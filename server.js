@@ -13,7 +13,6 @@ app.get('/consulta-anvisa', async (req, res) => {
 
     let browser;
     try {
-        // Configuração otimizada para ambiente cloud (Render)
         browser = await puppeteer.launch({
             args: chromium.args,
             defaultViewport: chromium.defaultViewport,
@@ -26,18 +25,23 @@ app.get('/consulta-anvisa', async (req, res) => {
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/cosmeticos/regularizados/${processo}`;
-
-        await page.goto('https://consultas.anvisa.gov.br/', { waitUntil: 'domcontentloaded' });
+        // Navega primeiro para a página do portal onde a aplicação Angular/React da Anvisa inicializa os tokens
+        const urlPortal = `https://consultas.anvisa.gov.br/#/cosmeticos/detalhe/${processo}/?namespace=&nome=`;
         
-        await new Promise(r => setTimeout(r, 3000));
+        await page.goto(urlPortal, { waitUntil: 'networkidle2', timeout: 30000 });
+        
+        // Aguarda a aplicação processar os scripts de segurança e carregar a API interna
+        await new Promise(r => setTimeout(r, 5000));
+
+        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/cosmeticos/regularizados/${processo}`;
 
         const resultadoJson = await page.evaluate(async (targetUrl) => {
             const response = await fetch(targetUrl, {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json, text/plain, */*',
-                    'Authorization': 'Guest'
+                    'Authorization': 'Guest',
+                    'Referer': 'https://consultas.anvisa.gov.br/'
                 }
             });
             if (!response.ok) {
