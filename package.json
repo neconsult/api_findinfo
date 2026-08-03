@@ -1,0 +1,11 @@
+{
+  "name": "anvisa-scraper-service",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^22.0.0",
+    "puppeteer-extra": "^4.2.0",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
