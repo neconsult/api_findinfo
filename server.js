@@ -6,11 +6,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/consulta-anvisa', async (req, res) => {
-    const idDocumento = req.query.id || "25351301175202204";
+    // Recebe o número do processo via query string (padrão de cosméticos)
+    const processo = req.query.processo || "25351616621201201";
 
     let browser;
     try {
-        // --- DADOS DO SEU PROXY ---
         const PROXY_HOST = "134.195.210.155";
         const PROXY_PORT = "3128";
 
@@ -29,14 +29,14 @@ app.get('/consulta-anvisa', async (req, res) => {
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-        // 1. Abre a rota visual para estabelecer a sessão do Cloudflare e os cookies
-        const urlVisual = `https://consultas.anvisa.gov.br/#/documentos/tecnicos/${idDocumento}/`;
+        // 1. Abre a rota visual correta de cosméticos na SPA da Anvisa
+        const urlVisual = `https://consultas.anvisa.gov.br/#/cosmeticos/regularizados/${processo}/?numeroProcesso=${processo}`;
         await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 30000 });
         
         await new Promise(r => setTimeout(r, 4000));
 
-        // 2. Executa o fetch direto para a API dentro do contexto do navegador simulado
-        const urlApi = `https://consultas.anvisa.gov.br/api/documento/tecnico/${idDocumento}`;
+        // 2. Executa o fetch direcionado exatamente para o endpoint de cosméticos da imagem
+        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/cosmeticos/regularizados/${processo}`;
         
         const resultadoJson = await page.evaluate(async (targetUrl) => {
             const response = await fetch(targetUrl, {
@@ -55,7 +55,7 @@ app.get('/consulta-anvisa', async (req, res) => {
 
         await browser.close();
         
-        // Retorna o JSON puro obtido da API da Anvisa
+        // Retorna o JSON limpo da consulta de cosméticos
         return res.json(resultadoJson);
 
     } catch (error) {
