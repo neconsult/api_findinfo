@@ -6,10 +6,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/consulta-anvisa', async (req, res) => {
-    const processo = req.query.processo;
-    if (!processo) {
-        return res.status(400).json({ erro: "Parâmetro 'processo' ausente" });
-    }
+    // Exemplo usando o parâmetro da URL que você validou
+    const idDocumento = req.query.id || "25351301175202204";
 
     let browser;
     try {
@@ -25,33 +23,21 @@ app.get('/consulta-anvisa', async (req, res) => {
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-        // Navega primeiro para a página do portal onde a aplicação Angular/React da Anvisa inicializa os tokens
-        const urlPortal = `https://consultas.anvisa.gov.br/#/cosmeticos/detalhe/${processo}/?namespace=&nome=`;
+        // Navega diretamente para a URL visual que passou na barreira do Cloudflare
+        const urlVisual = `https://consultas.anvisa.gov.br/#/documentos/tecnicos/${idDocumento}/`;
         
-        await page.goto(urlPortal, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 30000 });
         
-        // Aguarda a aplicação processar os scripts de segurança e carregar a API interna
-        await new Promise(r => setTimeout(r, 5000));
+        // Aguarda os elementos da página renderizarem completamente
+        await new Promise(r => setTimeout(r, 6000));
 
-        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/cosmeticos/regularizados/${processo}`;
-
-        const resultadoJson = await page.evaluate(async (targetUrl) => {
-            const response = await fetch(targetUrl, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json, text/plain, */*',
-                    'Authorization': 'Guest',
-                    'Referer': 'https://consultas.anvisa.gov.br/'
-                }
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return await response.json();
-        }, urlApi);
+        // Extrai o conteúdo da página ou da API que a página consome internamente
+        const conteudoPagina = await page.evaluate(() => {
+            return document.body.innerText; // Ou um seletor específico que traga os dados estruturados
+        });
 
         await browser.close();
-        return res.json(resultadoJson);
+        return res.json({ sucesso: true, dados: conteudoPagina });
 
     } catch (error) {
         if (browser) await browser.close();
