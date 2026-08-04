@@ -70,8 +70,8 @@ app.get('/teste', async (req, res) => {
 
     let browser;
     try {
-        const PROXY_HOST = "176.111.37.5";
-        const PROXY_PORT = "39811";
+        const PROXY_HOST = "153.51.241.50";
+        const PROXY_PORT = "999";
 
         browser = await puppeteer.launch({
             args: [
