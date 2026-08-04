@@ -123,9 +123,6 @@ app.get('/teste', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Microsserviço rodando na porta ${PORT}`);
-});
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
