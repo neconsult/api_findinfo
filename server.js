@@ -95,7 +95,7 @@ app.get('/teste', async (req, res) => {
         await new Promise(r => setTimeout(r, 4000));
 
         // 2. Executa o fetch direcionado exatamente para o endpoint de cosméticos da imagem
-        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter[cnpj]=00536772000142&order=asc`;
+        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
         
         const resultadoJson = await page.evaluate(async (targetUrl) => {
             const response = await fetch(targetUrl, {
