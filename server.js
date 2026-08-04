@@ -70,8 +70,8 @@ app.get('/teste', async (req, res) => {
 
     let browser;
     try {
-        const PROXY_HOST = "153.51.241.50";
-        const PROXY_PORT = "999";
+        const PROXY_HOST = "134.195.210.155";
+        const PROXY_PORT = "3128";
 
         browser = await puppeteer.launch({
             args: [
@@ -95,7 +95,10 @@ app.get('/teste', async (req, res) => {
         await new Promise(r => setTimeout(r, 4000));
 
         // 2. Executa o fetch direcionado exatamente para o endpoint de cosméticos da imagem
-        const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
+        //const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
+        const urlApi = ` https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?count=10&filter%5Bcnpj%5D=00536772000142&&page=1`;
+        
+       
         
         const resultadoJson = await page.evaluate(async (targetUrl) => {
             const response = await fetch(targetUrl, {
