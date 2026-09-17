@@ -31,7 +31,7 @@ app.get('/consulta-anvisa', async (req, res) => {
 
         // 1. Abre a rota visual correta de cosméticos na SPA da Anvisa
         const urlVisual = `https://consultas.anvisa.gov.br/#/cosmeticos/regularizados/${processo}/?numeroProcesso=${processo}`;
-        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 60000 });
         
         await new Promise(r => setTimeout(r, 4000));
 
@@ -90,7 +90,7 @@ app.get('/teste', async (req, res) => {
 
         // 1. Abre a rota visual correta de cosméticos na SPA da Anvisa
         const urlVisual = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
-        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 60000 });
         
         await new Promise(r => setTimeout(r, 4000));
 
@@ -152,8 +152,8 @@ app.get('/teste_risco1', async (req, res) => {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
         // 1. Abre a rota visual correta de cosméticos na SPA da Anvisa
-        const urlVisual = `https://consultas.anvisa.gov.br`;
-        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 30000 });
+        const urlVisual = `https://consultas.anvisa.gov.br/#/`;
+        await page.goto(urlVisual, { waitUntil: 'networkidle2', timeout: 60000 });
         
         await new Promise(r => setTimeout(r, 4000));
 
