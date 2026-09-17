@@ -11,7 +11,7 @@ app.get('/consulta-anvisa', async (req, res) => {
 
     let browser;
     try {
-        const PROXY_HOST = "134.195.210.155";
+        const PROXY_HOST = "1.231.81.166";
         const PROXY_PORT = "3128";
 
         browser = await puppeteer.launch({
