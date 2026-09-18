@@ -420,7 +420,7 @@ app.get('/teste_otimizado2', async (req, res) => {
                 await page.setRequestInterception(true);
                 page.on('request', (req) => {
                     const resourceType = req.resourceType();
-                    if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                    if (['image', 'stylesheet', 'font', 'media', 'other'].includes(resourceType)) {
                         req.abort();
                     } else {
                         req.continue();
@@ -429,12 +429,12 @@ app.get('/teste_otimizado2', async (req, res) => {
 
                 await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-                await page.goto('https://consultas.anvisa.gov.br/#/saneantes/notificados/25351500629202139/?cnpj=01358874000188', { 
+                await page.goto('https://consultas.anvisa.gov.br/#', { 
                     waitUntil: 'domcontentloaded', 
                     timeout: 100000 
                 });
                 
-                await new Promise(r => setTimeout(r, 1500));
+                await new Promise(r => setTimeout(r, 1000));
 
                 resultadoJson = await page.evaluate(async (targetUrl) => {
                     const response = await fetch(targetUrl, {
@@ -465,7 +465,7 @@ app.get('/teste_otimizado2', async (req, res) => {
             ultimoErro = error.message;
 
             if (tentativa < maxTentativas) {
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 400));
             }
         }
     }
