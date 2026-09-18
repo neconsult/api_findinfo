@@ -394,34 +394,7 @@ app.get('/teste_otimizado2', async (req, res) => {
         const sessaoValida = cachedCookies && (agora - sessionTimestamp < SESSION_TTL);
 
         try {
-            // --- CAMINHO SUPER RÁPIDO: SE TEMOS CACHE, USA O FETCH NATIVO DO NODE (SEM CHROMIUM!) ---
-            if (sessaoValida) {
-                console.log("[CACHE] Usando sessão em cache existente. Pulando Puppeteer.");
-                const cookieHeader = cachedCookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-                const response = await fetch(urlApi, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Authorization': 'Guest',
-                        'Referer': 'https://consultas.anvisa.gov.br/',
-                        'Cookie': cookieHeader,
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0'
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                resultadoJson = await response.json();
-                sucesso = true;
-                break;
-            }
-
-            // --- CAMINHO DE FALLBACK: ABRE O PUPPETEER PARA GERAR SESSÃO ---
-            console.log("[CACHE] Cache inválido ou expirado. Abrindo Puppeteer para nova sessão...");
-            
+           
             let browser = null;
             try {
                 const PROXY_HOST = "190.124.252.129";
@@ -463,10 +436,6 @@ app.get('/teste_otimizado2', async (req, res) => {
                 
                 await new Promise(r => setTimeout(r, 1500));
 
-                cachedCookies = await page.cookies();
-                sessionTimestamp = Date.now();
-                console.log("[CACHE] Nova sessão gerada e armazenada com sucesso.");
-
                 resultadoJson = await page.evaluate(async (targetUrl) => {
                     const response = await fetch(targetUrl, {
                         method: 'GET',
@@ -494,8 +463,7 @@ app.get('/teste_otimizado2', async (req, res) => {
 
         } catch (error) {
             ultimoErro = error.message;
-            // cachedCookies = null;
-            console.log(`[ERRO/CACHE] Tentativa ${tentativa} falhou: ${ultimoErro}. Limpando cache.`);
+
             if (tentativa < maxTentativas) {
                 await new Promise(r => setTimeout(r, 500));
             }
