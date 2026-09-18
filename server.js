@@ -366,7 +366,7 @@ app.get('/teste_otimizado', async (req, res) => {
 app.get('/teste_otimizado2', async (req, res) => {
     const processo = req.query.processo || "25351215885202212";
     
-    const maxTentativas = 5; // Reduzido para 5 pois com cache o fluxo é mais direto
+    const maxTentativas = 10; // Reduzido para 5 pois com cache o fluxo é mais direto
     let tentativa = 0;
     let sucesso = false;
     let resultadoJson = null;
@@ -383,7 +383,6 @@ app.get('/teste_otimizado2', async (req, res) => {
             browser = await puppeteer.launch({
                 args: [
                     ...chromium.args,
-                    `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
                     '--disable-gpu',
                     '--disable-dev-shm-usage',
                     '--disable-setuid-sandbox',
