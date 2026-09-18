@@ -5,6 +5,11 @@ const chromium = require('@sparticuz/chromium');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Variáveis globais para armazenar o cache de sessão na memória do Render
+let cachedCookies = null;
+let sessionTimestamp = 0;
+const SESSION_TTL = 15 * 60 * 1000; // Validade da sessão: 15 minutos
+
 app.get('/consulta-anvisa', async (req, res) => {
     // Recebe o número do processo via query string (padrão de cosméticos)
     const processo = req.query.processo || "25351616621201201";
@@ -357,6 +362,109 @@ app.get('/teste_otimizado', async (req, res) => {
     }
 });
 
+
+app.get('/teste_otimizado2', async (req, res) => {
+    const processo = req.query.processo || "25351215885202212";
+    
+    const maxTentativas = 5; // Reduzido para 5 pois com cache o fluxo é mais direto
+    let tentativa = 0;
+    let sucesso = false;
+    let resultadoJson = null;
+    let ultimoErro = null;
+
+    while (tentativa < maxTentativas && !sucesso) {
+        tentativa++;
+        let browser = null;
+
+        try {
+            const PROXY_HOST = "190.124.252.129";
+            const PROXY_PORT = "6666";
+
+            browser = await puppeteer.launch({
+                args: [
+                    ...chromium.args,
+                    `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage',
+                    '--disable-setuid-sandbox',
+                    '--no-sandbox',
+                    '--blink-settings=imagesEnabled=false'
+                ],
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                ignoreHTTPSErrors: true,
+            });
+
+            const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
+
+            // Verifica se o cache de cookies existe e ainda está dentro do tempo de validade
+            const agora = Date.now();
+            const sessaoValida = cachedCookies && (agora - sessionTimestamp < SESSION_TTL);
+
+            if (sessaoValida) {
+                // Se o cache é válido, injetamos os cookies direto na página sem precisar carregar a SPA pesada da Anvisa
+                await page.setCookie(...cachedCookies);
+            } else {
+                // Se não há cache ou expirou, fazemos a navegação inicial para gerar a sessão do Cloudflare
+                await page.goto('https://consultas.anvisa.gov.br/#/saneantes/notificados/25351500629202139/?cnpj=01358874000188', { waitUntil: 'domcontentloaded', timeout: 90000 });
+                
+                // Aguarda um instante para garantir que os cookies de validação foram gravados
+                await new Promise(r => setTimeout(r, 2000));
+
+                // Captura e armazena os cookies na memória global
+                cachedCookies = await page.cookies();
+                sessionTimestamp = Date.now();
+            }
+
+            // Executa o fetch direto injetado no contexto autenticado
+            const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados/${processo}`;
+            
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/'
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            }, urlApi);
+
+            await browser.close();
+            sucesso = true;
+
+        } catch (error) {
+            ultimoErro = error.message;
+            
+            // Se der erro (ex: Cloudflare bloqueou a sessão em cache), invalidamos o cache imediatamente
+            cachedCookies = null;
+
+            if (browser) {
+                try { await browser.close(); } catch (e) {}
+            }
+            if (tentativa < maxTentativas) {
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    }
+
+    if (sucesso) {
+        return res.json(resultadoJson);
+    } else {
+        return res.status(200).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "Não foi possível concluir a consulta na Anvisa após várias tentativas.",
+            detalhe: ultimoErro
+        });
+    }
+});
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
