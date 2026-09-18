@@ -367,7 +367,19 @@ app.get('/teste_otimizado2', async (req, res) => {
     const processo = req.query.processo || "25351215885202212";
     // --- const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados/${processo}`;
 
-    const urlApi =`https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?count=500&filter[cnpj]=05855974000170&page=1`;
+    const urlParam = req.query.url;
+    
+    if (!urlParam) {
+        return res.status(400).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "O parâmetro 'url' é obrigatório. Exemplo: /teste_otimizado2?url=https://consultas.anvisa.gov.br/api/..."
+        });
+    }
+
+    const urlApi = decodeURIComponent(urlParam);    
+
+    // const urlApi =`https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?count=500&filter[cnpj]=05855974000170&page=1`;
     
     const maxTentativas = 5;
     let tentativa = 0;
