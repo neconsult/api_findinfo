@@ -271,6 +271,92 @@ app.get('/teste_risco_erro_tratado', async (req, res) => {
     }
 });
 
+app.get('/teste_otimizado', async (req, res) => {
+    const processo = req.query.processo || "25351215885202212";
+    
+    const maxTentativas = 5;
+    let tentativa = 0;
+    let sucesso = false;
+    let resultadoJson = null;
+    let ultimoErro = null;
+
+    while (tentativa < maxTentativas && !sucesso) {
+        tentativa++;
+        let browser = null;
+
+        try {
+            const PROXY_HOST = "81.31.146.81";
+            const PROXY_PORT = "3128";
+
+            // Argumentos agressivos para desativar GPU, imagens e cache pesado
+            browser = await puppeteer.launch({
+                args: [
+                    ...chromium.args,
+                    `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage',
+                    '--disable-setuid-sandbox',
+                    '--no-sandbox',
+                    '--blink-settings=imagesEnabled=false' // Não carrega imagens
+                ],
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(),
+                headless: chromium.headless,
+                ignoreHTTPSErrors: true,
+            });
+
+            const page = await browser.newPage();
+            
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
+
+            // 1. Apenas visitamos a home da Anvisa de forma rápida (domínio raiz) para o Cloudflare registrar o cookie de sessão
+            await page.goto('https://consultas.anvisa.gov.br/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+
+            // 2. Executa o fetch direto injetado no contexto já autenticado pela visita
+            const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados/${processo}`;
+            
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/'
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            }, urlApi);
+
+            await browser.close();
+            sucesso = true;
+
+        } catch (error) {
+            ultimoErro = error.message;
+            if (browser) {
+                try { await browser.close(); } catch (e) {}
+            }
+            if (tentativa < maxTentativas) {
+                // Intervalo menor entre as tentativas para não perder tempo
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+    }
+
+    if (sucesso) {
+        return res.json(resultadoJson);
+    } else {
+        return res.status(200).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "Não foi possível concluir a consulta na Anvisa após várias tentativas.",
+            detalhe: ultimoErro
+        });
+    }
+});
+
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
