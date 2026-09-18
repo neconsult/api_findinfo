@@ -285,8 +285,8 @@ app.get('/teste_otimizado', async (req, res) => {
         let browser = null;
 
         try {
-            const PROXY_HOST = "190.124.252.129";
-            const PROXY_PORT = "6666";
+            const PROXY_HOST = "187.44.188.238";
+            const PROXY_PORT = "4040";
 
             // Argumentos agressivos para desativar GPU, imagens e cache pesado
             browser = await puppeteer.launch({
