@@ -441,7 +441,7 @@ app.get('/teste_otimizado2', async (req, res) => {
 
                 await page.goto('https://consultas.anvisa.gov.br/#/saneantes/notificados/25351500629202139/?cnpj=01358874000188', { 
                     waitUntil: 'domcontentloaded', 
-                    timeout: 30000 
+                    timeout: 100000 
                 });
                 
                 await new Promise(r => setTimeout(r, 1500));
