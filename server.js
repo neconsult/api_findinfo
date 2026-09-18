@@ -259,11 +259,7 @@ app.get('/teste_risco_erro_tratado', async (req, res) => {
 
     if (sucesso) {
         // Retorna o JSON de sucesso com estrutura padronizada (opcional, ou apenas o JSON direto)
-        return res.json({
-            sucesso: true,
-            erro: false,
-            dados: resultadoJson
-        });
+        return res.json(resultadoJson);
     } else {
         // Tratamento de erro padronizado caso as 5 tentativas falhem
         return res.status(200).json({
