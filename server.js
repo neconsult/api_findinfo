@@ -1,7 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
-const axios = require('axios'); // Certifique-se de ter o axios instalado ou use o fetch nativo do Node.js
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -363,12 +363,11 @@ app.get('/teste_otimizado', async (req, res) => {
     }
 });
 
-
 app.get('/teste_otimizado2', async (req, res) => {
     const processo = req.query.processo || "25351215885202212";
     const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados/${processo}`;
     
-    const maxTentativas = 5; // Reduzido para 5 (10 tentativas é excessivo e trava o fluxo se houver erro)
+    const maxTentativas = 5;
     let tentativa = 0;
     let sucesso = false;
     let resultadoJson = null;
@@ -381,28 +380,31 @@ app.get('/teste_otimizado2', async (req, res) => {
         const sessaoValida = cachedCookies && (agora - sessionTimestamp < SESSION_TTL);
 
         try {
-            // --- CAMINHO SUPER RÁPIDO: SE TEMOS CACHE, USAMOS FETCH PURO DO NODE (SEM CHROMIUM!) ---
+            // --- CAMINHO SUPER RÁPIDO: SE TEMOS CACHE, USA O FETCH NATIVO DO NODE (SEM CHROMIUM!) ---
             if (sessaoValida) {
-                // Formata os cookies guardados para o padrão de string do cabeçalho HTTP
                 const cookieHeader = cachedCookies.map(c => `${c.name}=${c.value}`).join('; ');
 
-                const response = await axios.get(urlApi, {
+                const response = await fetch(urlApi, {
+                    method: 'GET',
                     headers: {
                         'Accept': 'application/json, text/plain, */*',
                         'Authorization': 'Guest',
                         'Referer': 'https://consultas.anvisa.gov.br/',
                         'Cookie': cookieHeader,
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0'
-                    },
-                    timeout: 10000 // Timeout curto de 10s para o fetch direto
+                    }
                 });
 
-                resultadoJson = response.data;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                resultadoJson = await response.json();
                 sucesso = true;
-                break; // Sucesso pelo cache, sai do loop imediatamente
+                break;
             }
 
-            // --- CAMINHO DE FALLBACK: SE NÃO HÁ CACHE, ABRE O PUPPETEER PARA GERAR SESSÃO ---
+            // --- CAMINHO DE FALLBACK: ABRE O PUPPETEER PARA GERAR SESSÃO ---
             let browser = null;
             try {
                 const PROXY_HOST = "190.124.252.129";
@@ -425,7 +427,6 @@ app.get('/teste_otimizado2', async (req, res) => {
 
                 const page = await browser.newPage();
                 
-                // Otimização extrema: abortar requisições de arquivos pesados que não interessam
                 await page.setRequestInterception(true);
                 page.on('request', (req) => {
                     const resourceType = req.resourceType();
@@ -438,20 +439,16 @@ app.get('/teste_otimizado2', async (req, res) => {
 
                 await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-                // Navegação otimizada usando domcontentloaded (não espera assets pesados carregarem)
                 await page.goto('https://consultas.anvisa.gov.br/#/saneantes/notificados/25351500629202139/?cnpj=01358874000188', { 
                     waitUntil: 'domcontentloaded', 
                     timeout: 30000 
                 });
                 
-                // Pequena pausa estritamente necessária para o Cloudflare registrar o cookie
                 await new Promise(r => setTimeout(r, 1500));
 
-                // Captura e armazena os cookies globalmente
                 cachedCookies = await page.cookies();
                 sessionTimestamp = Date.now();
 
-                // Executa o fetch dentro do contexto recém-criado
                 resultadoJson = await page.evaluate(async (targetUrl) => {
                     const response = await fetch(targetUrl, {
                         method: 'GET',
@@ -474,16 +471,15 @@ app.get('/teste_otimizado2', async (req, res) => {
                 if (browser) {
                     try { await browser.close(); } catch (e) {}
                 }
-                throw innerError; // Joga para o catch externo lidar com as tentativas
+                throw innerError;
             }
 
         } catch (error) {
             ultimoErro = error.message;
-            // Se der erro (seja no fetch direto ou no Puppeteer), invalidamos o cache para forçar renovação na próxima
             cachedCookies = null;
 
             if (tentativa < maxTentativas) {
-                await new Promise(r => setTimeout(r, 500)); // Intervalo menor entre retentativas
+                await new Promise(r => setTimeout(r, 500));
             }
         }
     }
