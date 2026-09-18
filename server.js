@@ -310,7 +310,7 @@ app.get('/teste_otimizado', async (req, res) => {
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
             // 1. Apenas visitamos a home da Anvisa de forma rápida (domínio raiz) para o Cloudflare registrar o cookie de sessão
-            await page.goto('https://consultas.anvisa.gov.br/#/saneantes/notificados/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await page.goto('https://consultas.anvisa.gov.br/#/saneantes/notificados/25351500629202139/?cnpj=01358874000188', { waitUntil: 'domcontentloaded', timeout: 20000 });
 
             // 2. Executa o fetch direto injetado no contexto já autenticado pela visita
             const urlApi = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados/${processo}`;
