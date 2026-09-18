@@ -396,6 +396,7 @@ app.get('/teste_otimizado2', async (req, res) => {
         try {
             // --- CAMINHO SUPER RÁPIDO: SE TEMOS CACHE, USA O FETCH NATIVO DO NODE (SEM CHROMIUM!) ---
             if (sessaoValida) {
+                console.log("[CACHE] Usando sessão em cache existente. Pulando Puppeteer.");
                 const cookieHeader = cachedCookies.map(c => `${c.name}=${c.value}`).join('; ');
 
                 const response = await fetch(urlApi, {
@@ -419,6 +420,8 @@ app.get('/teste_otimizado2', async (req, res) => {
             }
 
             // --- CAMINHO DE FALLBACK: ABRE O PUPPETEER PARA GERAR SESSÃO ---
+            console.log("[CACHE] Cache inválido ou expirado. Abrindo Puppeteer para nova sessão...");
+            
             let browser = null;
             try {
                 const PROXY_HOST = "190.124.252.129";
@@ -462,6 +465,7 @@ app.get('/teste_otimizado2', async (req, res) => {
 
                 cachedCookies = await page.cookies();
                 sessionTimestamp = Date.now();
+                console.log("[CACHE] Nova sessão gerada e armazenada com sucesso.");
 
                 resultadoJson = await page.evaluate(async (targetUrl) => {
                     const response = await fetch(targetUrl, {
@@ -490,8 +494,8 @@ app.get('/teste_otimizado2', async (req, res) => {
 
         } catch (error) {
             ultimoErro = error.message;
-            cachedCookies = null;
-
+            // cachedCookies = null;
+            console.log(`[ERRO/CACHE] Tentativa ${tentativa} falhou: ${ultimoErro}. Limpando cache.`);
             if (tentativa < maxTentativas) {
                 await new Promise(r => setTimeout(r, 500));
             }
