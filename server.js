@@ -11,6 +11,60 @@ let cachedCookies = null;
 let sessionTimestamp = 0;
 const SESSION_TTL = 15 * 60 * 1000; // Validade da sessão: 15 minutos
 
+
+// --- VARIÁVEIS GLOBAIS PARA O NAVEGADOR PERSISTENTE ---
+let globalBrowser = null;
+let globalPage = null;
+
+async function getBrowserInstance() {
+    // Se já existe e está conectado, reaproveita
+    if (globalBrowser && globalBrowser.isConnected()) {
+        return { browser: globalBrowser, page: globalPage };
+    }
+
+    const PROXY_HOST = "190.124.252.129";
+    const PROXY_PORT = "6666";
+
+    console.log("[INICIALIZAÇÃO] Subindo instância persistente do Chromium...");
+    globalBrowser = await puppeteer.launch({
+        args: [
+            ...chromium.args,
+            `--proxy-server=http://\({PROXY_HOST}:\){PROXY_PORT}`,
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--disable-setuid-sandbox',
+            '--no-sandbox'
+        ],
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+    });
+
+    globalPage = await globalBrowser.newPage();
+    
+    // Configura o bloqueio de recursos pesados uma única vez
+    await globalPage.setRequestInterception(true);
+    globalPage.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (['image', 'stylesheet', 'font', 'media', 'other'].includes(resourceType)) {
+            req.abort();
+        } else {
+            req.continue();
+        }
+    });
+
+    await globalPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
+
+    // Acessa a raiz para passar pelo Cloudflare inicial
+    await globalPage.goto('https://consultas.anvisa.gov.br/#', { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 60000 
+    });
+
+    return { browser: globalBrowser, page: globalPage };
+}
+
 app.get('/consulta-anvisa', async (req, res) => {
     // Recebe o número do processo via query string (padrão de cosméticos)
     const processo = req.query.processo || "25351616621201201";
@@ -463,6 +517,79 @@ app.get('/teste_otimizado2', async (req, res) => {
 
         } catch (error) {
             ultimoErro = error.message;
+
+            if (tentativa < maxTentativas) {
+                await new Promise(r => setTimeout(r, 400));
+            }
+        }
+    }
+
+    if (sucesso) {
+        return res.json(resultadoJson);
+    } else {
+        return res.status(200).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "Não foi possível concluir a consulta na Anvisa após várias tentativas.",
+            detalhe: ultimoErro
+        });
+    }
+});
+
+
+app.get('/teste_otimizado3', async (req, res) => {
+    const urlParam = req.query.url;
+    
+    if (!urlParam) {
+        return res.status(400).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "O parâmetro 'url' é obrigatório. Exemplo: /teste_otimizado2?url=https://consultas.anvisa.gov.br/api/..."
+        });
+    }
+
+    const urlApi = decodeURIComponent(urlParam);
+    
+    const maxTentativas = 3;
+    let tentativa = 0;
+    let sucesso = false;
+    let resultadoJson = null;
+    let ultimoErro = null;
+
+    while (tentativa < maxTentativas && !sucesso) {
+        tentativa++;
+
+        try {
+            // Pega a instância já aberta em background
+            const { page } = await getBrowserInstance();
+
+            // Executa o fetch diretamente na página que já está com a sessão ativa
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/'
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            }, urlApi);
+
+            sucesso = true;
+
+        } catch (error) {
+            ultimoErro = error.message;
+            
+            // Se der erro (ex: Cloudflare derrubou a sessão da aba), destruímos a instância global para forçar uma nova limpa na próxima tentativa
+            if (globalBrowser) {
+                try { await globalBrowser.close(); } catch (e) {}
+            }
+            globalBrowser = null;
+            globalPage = null;
 
             if (tentativa < maxTentativas) {
                 await new Promise(r => setTimeout(r, 400));
