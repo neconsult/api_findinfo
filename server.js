@@ -28,7 +28,7 @@ async function getBrowserInstance() {
     globalBrowser = await puppeteer.launch({
         args: [
             ...chromium.args,
-            `--proxy-server=http://\({PROXY_HOST}:\){PROXY_PORT}`,
+            `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
             '--disable-gpu',
             '--disable-dev-shm-usage',
             '--disable-setuid-sandbox',
