@@ -574,6 +574,10 @@ app.get('/teste_otimizado3', async (req, res) => {
                         'Referer': 'https://consultas.anvisa.gov.br/'
                     }
                 });
+                // Se o Cloudflare bloquear, retornamos o status explicitamente para o Node tratar
+                if (response.status === 403) {
+                    throw new Error("CLOUD_FLARE_403_BLOCK");
+                }
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -593,7 +597,11 @@ app.get('/teste_otimizado3', async (req, res) => {
             }
 
             // Se o navegador master travou inteiro, limpamos a referência global
-            if (!globalBrowser || !globalBrowser.isConnected()) {
+            if (error.message.includes("CLOUD_FLARE_403_BLOCK") || !globalBrowser || !globalBrowser.isConnected()) {
+                console.log("[SEGURANÇA] Bloqueio 403 detectado ou browser instável. Reinicializando o Chromium...");
+                if (globalBrowser) {
+                    try { await globalBrowser.close(); } catch (e) {}
+                }
                 globalBrowser = null;
             }
 
