@@ -550,7 +550,7 @@ app.get('/teste_otimizado3', async (req, res) => {
 
     const urlApi = decodeURIComponent(urlParam);
     
-    const maxTentativas = 3;
+    const maxTentativas = 2;
     let tentativa = 0;
     let sucesso = false;
     let resultadoJson = null;
