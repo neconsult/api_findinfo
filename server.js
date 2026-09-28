@@ -435,7 +435,7 @@ app.get('/teste_otimizado2', async (req, res) => {
 
     // const urlApi =`https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?count=500&filter[cnpj]=05855974000170&page=1`;
     
-    const maxTentativas = 10;
+    const maxTentativas = 5;
     let tentativa = 0;
     let sucesso = false;
     let resultadoJson = null;
