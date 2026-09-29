@@ -84,7 +84,7 @@ async function getBrowserInstanceProc() {
             '--disable-gpu',
             '--disable-dev-shm-usage',
             '--disable-setuid-sandbox',
-            '--no-sandbox'
+            '--no-sandbox',
             // --- NOVOS ARGUMENTOS PARA EVITAR DETECTION DE HEADLESS ---
             '--disable-blink-features=AutomationControlled', // Remove a flag que denuncia automação
             '--window-size=1920,1080',
