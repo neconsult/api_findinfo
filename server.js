@@ -667,10 +667,10 @@ app.get('/teste_otimizadoproc', async (req, res) => {
             const browser = await getBrowserInstanceProc();
             page = await browser.newPage();
             
-            // Permitimos requisições essenciais para o Cloudflare rodar seus scripts de desafio
             await page.setRequestInterception(true);
             page.on('request', (req) => {
                 const resourceType = req.resourceType();
+                // Permitimos scripts e xhr para que o Angular e o Cloudflare rodem perfeitamente
                 if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
                     req.abort();
                 } else {
@@ -680,27 +680,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-            let apiResponseData = null;
-
-            // Fica escutando a rede da aba. Assim que a Anvisa puxar o JSON da API oficial, capturamos!
-            page.on('response', async (response) => {
-                const responseUrl = response.url();
-                // Verifica se a URL da resposta contém o trecho da API que buscamos
-                if (responseUrl.includes('/api/documento/') || responseUrl.includes(urlApi)) {
-                    try {
-                        if (response.status() === 200) {
-                            const contentType = response.headers()['content-type'] || '';
-                            if (contentType.includes('application/json')) {
-                                apiResponseData = await response.json();
-                            }
-                        } else if (response.status() === 403) {
-                            console.log("[CLOUD_FLARE] Detectado 403 direto na resposta de rede da API.");
-                        }
-                    } catch (e) {}
-                }
-            });
-
-            // Descobre o ID do documento para montar a URL visual correta baseada no seu link de exemplo
+            // 1. Monta a URL visual correspondente
             let urlVisualAlvo = 'https://consultas.anvisa.gov.br/#/';
             if (urlApi.includes('/api/documento/')) {
                 const partes = urlApi.split('/');
@@ -710,33 +690,44 @@ app.get('/teste_otimizadoproc', async (req, res) => {
                 urlVisualAlvo = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
             }
 
-            console.log(`[NAVEGAÇÃO] Abrindo URL visual: ${urlVisualAlvo}`);
+            console.log(`[NAVEGAÇÃO TENTATIVA \({tentativa}] Abrindo:\){urlVisualAlvo}`);
 
-            // 1. Navega direto para a página visual do documento
+            // 2. Navega para a página visual e aguarda a estabilização completa da SPA
             await page.goto(urlVisualAlvo, { 
-                waitUntil: 'networkidle2', // Aguarda a rede acalmar (crucial para o Cloudflare e carregamento do Angular)
+                waitUntil: 'networkidle0', // Aguarda a rede ficar completamente ociosa (garante que o Cloudflare passou e o Angular carregou)
                 timeout: 60000 
             });
 
-            // 2. Loop de espera inteligente: dá tempo real (até 15 segundos) para o Cloudflare sumir e a API responder
-            let tempoEspera = 0;
-            while (!apiResponseData && tempoEspera < 15000) {
-                await new Promise(r => setTimeout(r, 1000));
-                tempoEspera += 1000;
-                
-                // Se a página travou em tela de bloqueio do Cloudflare, podemos identificar pelo HTML
-                const conteudoHtml = await page.content().catch(e => "");
-                if (conteudoHtml.includes("Access denied") || conteudoHtml.includes("Error 403")) {
+            // 3. Dá uma folga para o front-end renderizar os componentes e disparar o carregamento
+            await new Promise(r => setTimeout(r, 4000));
+
+            // 4. Com a sessão 100% autenticada e aquecida na aba, executamos o fetch diretamente de dentro do contexto do navegador
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/'
+                    }
+                });
+
+                if (response.status === 403) {
                     throw new Error("CLOUD_FLARE_403_BLOCK");
                 }
-            }
 
-            if (!apiResponseData) {
-                // Se a rede não disparou o JSON automaticamente, tentamos forçar um reload ou aguardar um pouco mais
-                throw new Error("TIMEOUT_AGUARDANDO_DADOS_API");
-            }
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
 
-            resultadoJson = apiResponseData;
+                const rawText = await response.text();
+                if (!rawText || rawText.trim() === "") {
+                    throw new Error("EMPTY_JSON_RESPONSE");
+                }
+
+                return JSON.parse(rawText);
+            }, urlApi);
+
             await page.close();
             sucesso = true;
 
