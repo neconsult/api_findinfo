@@ -648,6 +648,8 @@ app.get('/teste_otimizado3', async (req, res) => {
     }
 });
 
+const axios = require('axios'); // Garanta que o axios está instalado no projeto (npm install axios)
+
 app.get('/teste_otimizadoproc', async (req, res) => {
     const urlParam = req.query.url;
     
@@ -674,36 +676,14 @@ app.get('/teste_otimizadoproc', async (req, res) => {
         try {
             const browser = await getBrowserInstanceProc();
             page = await browser.newPage();
-
-// Esconde o fato de que a aba está sendo controlada por robô
-await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-    });
-    // Simula plugins reais de navegador
-    Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5],
-    });
-    // Simula linguagens aceitas
-    Object.defineProperty(navigator, 'languages', {
-        get: () => ['pt-BR', 'pt', 'en-US', 'en'],
-    });
-});            
             
-            await page.setRequestInterception(true);
-            page.on('request', (req) => {
-                const resourceType = req.resourceType();
-                // Permitimos scripts e xhr para que o Angular e o Cloudflare rodem perfeitamente
-                if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-                    req.abort();
-                } else {
-                    req.continue();
-                }
+            // Aplica a camuflagem na aba
+            await page.evaluateOnNewDocument(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] });
             });
 
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
-
-            // 1. Monta a URL visual correspondente
             let urlVisualAlvo = 'https://consultas.anvisa.gov.br/#/';
             if (urlApi.includes('/api/documento/')) {
                 const partes = urlApi.split('/');
@@ -713,45 +693,42 @@ await page.evaluateOnNewDocument(() => {
                 urlVisualAlvo = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
             }
 
-            console.log(`[NAVEGAÇÃO TENTATIVA \({tentativa}] Abrindo:\){urlVisualAlvo}`);
+            console.log(`[NAVEGAÇÃO TENTATIVA \({tentativa}] Abrindo URL visual:\){urlVisualAlvo}`);
 
-            // 2. Navega para a página visual e aguarda a estabilização completa da SPA
+            // 1. Navega para a página visual para o Cloudflare liberar a sessão e gerar o cookie
             await page.goto(urlVisualAlvo, { 
-                waitUntil: 'networkidle0', // Aguarda a rede ficar completamente ociosa (garante que o Cloudflare passou e o Angular carregou)
+                waitUntil: 'networkidle2', 
                 timeout: 60000 
             });
 
-            // 3. Dá uma folga para o front-end renderizar os componentes e disparar o carregamento
+            // Aguarda o desafio do Cloudflare resolver na tela
             await new Promise(r => setTimeout(r, 4000));
 
-            // 4. Com a sessão 100% autenticada e aquecida na aba, executamos o fetch diretamente de dentro do contexto do navegador
-            resultadoJson = await page.evaluate(async (targetUrl) => {
-                const response = await fetch(targetUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Authorization': 'Guest',
-                        'Referer': 'https://consultas.anvisa.gov.br/'
-                    }
-                });
-
-                if (response.status === 403) {
-                    throw new Error("CLOUD_FLARE_403_BLOCK");
-                }
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const rawText = await response.text();
-                if (!rawText || rawText.trim() === "") {
-                    throw new Error("EMPTY_JSON_RESPONSE");
-                }
-
-                return JSON.parse(rawText);
-            }, urlApi);
+            // 2. Extrai todos os cookies gerados pela sessão válida do navegador
+            const cookies = await page.cookies();
+            const cookieHeader = cookies.map(c => `\({c.name}=\){c.value}`).join('; ');
 
             await page.close();
+
+            console.log(`[HTTP REQUEST] Baixando JSON via requisição externa com cookies capturados...`);
+
+            // 3. Faz a requisição diretamente para a API usando os cookies legítimos do Cloudflare
+            const apiResponse = await axios.get(urlApi, {
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Authorization': 'Guest',
+                    'Referer': 'https://consultas.anvisa.gov.br/',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+                    'Cookie': cookieHeader
+                },
+                timeout: 30000
+            });
+
+            if (apiResponse.status === 403) {
+                throw new Error("CLOUD_FLARE_403_BLOCK");
+            }
+
+            resultadoJson = apiResponse.data;
             sucesso = true;
 
         } catch (error) {
@@ -762,7 +739,7 @@ await page.evaluateOnNewDocument(() => {
                 try { await page.close(); } catch (e) {}
             }
 
-            if (error.message.includes("CLOUD_FLARE_403_BLOCK") || !globalBrowserProc || !globalBrowserProc.isConnected()) {
+            if (error.message.includes("403") || error.message.includes("CLOUD_FLARE_403_BLOCK") || !globalBrowserProc || !globalBrowserProc.isConnected()) {
                 console.log("[SEGURANÇA] Reinicializando o Chromium master devido a bloqueio...");
                 if (globalBrowserProc) {
                     try { await globalBrowserProc.close(); } catch (e) {}
