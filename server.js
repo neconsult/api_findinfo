@@ -22,8 +22,8 @@ async function getBrowserInstance() {
         return { browser: globalBrowser, page: globalPage };
     }
 
-    const PROXY_HOST = "187.44.188.238";
-    const PROXY_PORT = "4040";
+    const PROXY_HOST = "190.83.40.166";
+    const PROXY_PORT = "3128";
 
     console.log("[INICIALIZAÇÃO] Subindo instância persistente do Chromium...");
     globalBrowser = await puppeteer.launch({
