@@ -54,10 +54,8 @@ async function getBrowserInstance() {
         }
     });
 
-    await globalPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
-
     // Acessa a raiz para passar pelo Cloudflare inicial
-    await globalPage.goto('https://consultas.anvisa.gov.br/#/documentos/tecnicos/250000016249843', { 
+    await globalPage.goto('https://consultas.anvisa.gov.br/#', { 
         waitUntil: 'domcontentloaded', 
         timeout: 120000 
     });
@@ -65,6 +63,37 @@ async function getBrowserInstance() {
     await new Promise(r => setTimeout(r, 2500));
     
     return { browser: globalBrowser, page: globalPage };
+}
+
+let globalBrowserProc = null;
+
+async function getBrowserInstanceProc() {
+    // Se o browser já existe e está conectado, reaproveita a instância principal
+    if (globalBrowserProc && globalBrowserProc.isConnected()) {
+        return globalBrowserProc;
+    }
+
+    const PROXY_HOST = "186.216.208.98";
+    const PROXY_PORT = "3128";
+
+    console.log("[INICIALIZAÇÃO] Subindo instância master persistente do Chromium...");
+    globalBrowserProc = await puppeteer.launch({
+        args: [
+            ...chromium.args,
+            `--proxy-server=http://\({PROXY_HOST}:\){PROXY_PORT}`,
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--disable-setuid-sandbox',
+            '--no-sandbox'
+        ],
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+    });
+
+    return globalBrowserProc;
+
 }
 
 app.get('/consulta-anvisa', async (req, res) => {
@@ -595,6 +624,134 @@ app.get('/teste_otimizado3', async (req, res) => {
 
             if (tentativa < maxTentativas) {
                 await new Promise(r => setTimeout(r, 400));
+            }
+        }
+    }
+
+    if (sucesso) {
+        return res.json(resultadoJson);
+    } else {
+        return res.status(200).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "Não foi possível concluir a consulta na Anvisa após várias tentativas.",
+            detalhe: ultimoErro
+        });
+    }
+});
+
+app.get('/teste_otimizadoproc', async (req, res) => {
+    const urlParam = req.query.url;
+    
+    if (!urlParam) {
+        return res.status(400).json({
+            sucesso: false,
+            erro: true,
+            mensagem: "O parâmetro 'url' é obrigatório. Exemplo: /teste_otimizado3?url=https://consultas.anvisa.gov.br/api/..."
+        });
+    }
+
+    const urlApi = decodeURIComponent(urlParam);
+    
+    const maxTentativas = 2;
+    let tentativa = 0;
+    let sucesso = false;
+    let resultadoJson = null;
+    let ultimoErro = null;
+
+    while (tentativa < maxTentativas && !sucesso) {
+        tentativa++;
+        let page = null;
+
+        try {
+            const browser = await getBrowserInstanceProc();
+            
+            // Abre uma NOVA ABA isolada para esta requisição específica
+            page = await browser.newPage();
+            
+            await page.setRequestInterception(true);
+            page.on('request', (req) => {
+                const resourceType = req.resourceType();
+                if (['image', 'stylesheet', 'font', 'media', 'other'].includes(resourceType)) {
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+            });
+
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
+
+            // Define dinamicamente a rota correta baseada na URL solicitada pelo ASP
+            let urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/';
+            if (urlApi.includes('/api/documento/')) {
+                const partes = urlApi.split('/');
+                const idDoc = partes[partes.length - 1];
+                urlAlvoNavegacao = `https://consultas.anvisa.gov.br/#/documentos/tecnicos/${idDoc}`;
+            } else if (urlApi.includes('/saneantes/')) {
+                urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
+            }
+
+            // Navega na aba isolada com timeout seguro
+            await page.goto(urlAlvoNavegacao, { 
+                waitUntil: 'domcontentloaded', 
+                timeout: 60000 
+            });
+            
+            // Pausa essencial para o Cloudflare processar o desafio da rota específica
+            await new Promise(r => setTimeout(r, 2500));
+
+            // Executa o fetch dentro do contexto da página validada
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/'
+                    }
+                });
+
+                if (response.status === 403) {
+                    throw new Error("CLOUD_FLARE_403_BLOCK");
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const rawText = await response.text();
+                if (!rawText || rawText.trim() === "") {
+                    throw new Error("EMPTY_JSON_RESPONSE");
+                }
+
+                try {
+                    return JSON.parse(rawText);
+                } catch (e) {
+                    throw new Error("INVALID_JSON_FORMAT");
+                }
+            }, urlApi);
+
+            await page.close();
+            sucesso = true;
+
+        } catch (error) {
+            ultimoErro = error.message;
+            
+            if (page) {
+                try { await page.close(); } catch (e) {}
+            }
+
+            // Se o Cloudflare barrar com 403, derrubamos o browser master para limpar os cookies corrompidos
+            if (error.message.includes("CLOUD_FLARE_403_BLOCK") || !globalBrowserProc || !globalBrowserProc.isConnected()) {
+                console.log("[SEGURANÇA] Bloqueio 403 detectado. Reinicializando o Chromium master...");
+                if (globalBrowserProc) {
+                    try { await globalBrowserProc.close(); } catch (e) {}
+                }
+                globalBrowserProc = null;
+            }
+
+            if (tentativa < maxTentativas) {
+                await new Promise(r => setTimeout(r, 500));
             }
         }
     }
