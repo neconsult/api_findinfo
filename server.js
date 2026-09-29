@@ -85,8 +85,15 @@ async function getBrowserInstanceProc() {
             '--disable-dev-shm-usage',
             '--disable-setuid-sandbox',
             '--no-sandbox'
+            // --- NOVOS ARGUMENTOS PARA EVITAR DETECTION DE HEADLESS ---
+            '--disable-blink-features=AutomationControlled', // Remove a flag que denuncia automação
+            '--window-size=1920,1080',
+            '--start-maximized',
+            '--lang=pt-BR,pt;q=0.9',
+            '--no-first-run',
+            '--no-default-browser-check'
         ],
-        defaultViewport: chromium.defaultViewport,
+        defaultViewport: { width: 1920, height: 1080 },
         executablePath: await chromium.executablePath(),
         headless: chromium.headless,
         ignoreHTTPSErrors: true,
@@ -117,6 +124,7 @@ app.get('/consulta-anvisa', async (req, res) => {
         });
 
         const page = await browser.newPage();
+        
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
@@ -666,6 +674,21 @@ app.get('/teste_otimizadoproc', async (req, res) => {
         try {
             const browser = await getBrowserInstanceProc();
             page = await browser.newPage();
+
+// Esconde o fato de que a aba está sendo controlada por robô
+await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+    });
+    // Simula plugins reais de navegador
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+    });
+    // Simula linguagens aceitas
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+    });
+});            
             
             await page.setRequestInterception(true);
             page.on('request', (req) => {
