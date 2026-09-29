@@ -647,7 +647,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
         return res.status(400).json({
             sucesso: false,
             erro: true,
-            mensagem: "O parâmetro 'url' é obrigatório. Exemplo: /teste_otimizado3?url=https://consultas.anvisa.gov.br/api/..."
+            mensagem: "O parâmetro 'url' é obrigatório. Exemplo: /teste_otimizadoproc?url=https://consultas.anvisa.gov.br/api/..."
         });
     }
 
@@ -681,55 +681,32 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-            // Define dinamicamente a rota correta baseada na URL solicitada pelo ASP
-            let urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/';
-            if (urlApi.includes('/api/documento/')) {
-                const partes = urlApi.split('/');
-                const idDoc = partes[partes.length - 1];
-                urlAlvoNavegacao = `https://consultas.anvisa.gov.br/#/documentos/tecnicos/${idDoc}`;
-            } else if (urlApi.includes('/saneantes/')) {
-                urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
-            }
-
-            // Navega na aba isolada com timeout seguro
-            await page.goto(urlAlvoNavegacao, { 
+            // Navega DIRETAMENTE para a URL da API do endpoint desejado na aba do navegador
+            await page.goto(urlApi, { 
                 waitUntil: 'domcontentloaded', 
                 timeout: 60000 
             });
             
-            // Pausa essencial para o Cloudflare processar o desafio da rota específica
-            await new Promise(r => setTimeout(r, 2500));
+            // Pausa breve para estabilizar o carregamento do texto bruto da resposta da API
+            await new Promise(r => setTimeout(r, 1000));
 
-            // Executa o fetch dentro do contexto da página validada
-            resultadoJson = await page.evaluate(async (targetUrl) => {
-                const response = await fetch(targetUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Authorization': 'Guest',
-                        'Referer': 'https://consultas.anvisa.gov.br/'
-                    }
-                });
+            // Captura o conteúdo de texto exibido na página (o JSON puro retornado pela API)
+            const rawText = await page.evaluate(() => {
+                const pre = document.querySelector('pre');
+                if (pre) return pre.innerText;
+                return document.body.innerText;
+            });
 
-                if (response.status === 403) {
-                    throw new Error("CLOUD_FLARE_403_BLOCK");
-                }
+            if (!rawText || rawText.trim() === "") {
+                throw new Error("EMPTY_JSON_RESPONSE");
+            }
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const rawText = await response.text();
-                if (!rawText || rawText.trim() === "") {
-                    throw new Error("EMPTY_JSON_RESPONSE");
-                }
-
-                try {
-                    return JSON.parse(rawText);
-                } catch (e) {
-                    throw new Error("INVALID_JSON_FORMAT");
-                }
-            }, urlApi);
+            try {
+                resultadoJson = JSON.parse(rawText);
+            } catch (e) {
+                // Se falhou ao interpretar como JSON, significa que o Cloudflare interceptou e devolveu um HTML de bloqueio
+                throw new Error("CLOUD_FLARE_403_BLOCK");
+            }
 
             await page.close();
             sucesso = true;
