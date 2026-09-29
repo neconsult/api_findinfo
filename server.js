@@ -677,7 +677,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
             const browser = await getBrowserInstanceProc();
             page = await browser.newPage();
             
-            // Aplica a camuflagem na aba
+            // Camuflagem anti-bot na aba
             await page.evaluateOnNewDocument(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => false });
                 Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
@@ -693,42 +693,47 @@ app.get('/teste_otimizadoproc', async (req, res) => {
                 urlVisualAlvo = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
             }
 
-            console.log(`[NAVEGAÇÃO TENTATIVA \({tentativa}] Abrindo URL visual:\){urlVisualAlvo}`);
+            console.log(`[TENTATIVA \({tentativa}] Carregando contexto visual:\){urlVisualAlvo}`);
 
-            // 1. Navega para a página visual para o Cloudflare liberar a sessão e gerar o cookie
+            // 1. Navega para a página visual para o Cloudflare liberar a sessão na aba
             await page.goto(urlVisualAlvo, { 
                 waitUntil: 'networkidle2', 
                 timeout: 60000 
             });
 
-            // Aguarda o desafio do Cloudflare resolver na tela
+            // Aguarda o processamento do desafio do Cloudflare
             await new Promise(r => setTimeout(r, 4000));
 
-            // 2. Extrai todos os cookies gerados pela sessão válida do navegador
-            const cookies = await page.cookies();
-            const cookieHeader = cookies.map(c => `\({c.name}=\){c.value}`).join('; ');
+            console.log(`[TENTATIVA ${tentativa}] Executando fetch interno com o TLS do navegador...`);
+
+            // 2. Executa o fetch DIRETAMENTE de dentro da aba do navegador (aproveitando o TLS e os cookies válidos)
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/'
+                    }
+                });
+
+                if (response.status === 403) {
+                    throw new Error("CLOUD_FLARE_403_BLOCK");
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const rawText = await response.text();
+                if (!rawText || rawText.trim() === "") {
+                    throw new Error("EMPTY_JSON_RESPONSE");
+                }
+
+                return JSON.parse(rawText);
+            }, urlApi);
 
             await page.close();
-
-            console.log(`[HTTP REQUEST] Baixando JSON via requisição externa com cookies capturados...`);
-
-            // 3. Faz a requisição diretamente para a API usando os cookies legítimos do Cloudflare
-            const apiResponse = await axios.get(urlApi, {
-                headers: {
-                    'Accept': 'application/json, text/plain, */*',
-                    'Authorization': 'Guest',
-                    'Referer': 'https://consultas.anvisa.gov.br/',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
-                    'Cookie': cookieHeader
-                },
-                timeout: 30000
-            });
-
-            if (apiResponse.status === 403) {
-                throw new Error("CLOUD_FLARE_403_BLOCK");
-            }
-
-            resultadoJson = apiResponse.data;
             sucesso = true;
 
         } catch (error) {
