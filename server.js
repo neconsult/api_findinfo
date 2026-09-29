@@ -57,11 +57,13 @@ async function getBrowserInstance() {
     await globalPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
     // Acessa a raiz para passar pelo Cloudflare inicial
-    await globalPage.goto('https://consultas.anvisa.gov.br/#/documentos/tecnicos/', { 
+    await globalPage.goto('https://consultas.anvisa.gov.br/#/documentos/tecnicos/250000016249843', { 
         waitUntil: 'domcontentloaded', 
         timeout: 120000 
     });
-
+    
+    await new Promise(r => setTimeout(r, 2500));
+    
     return { browser: globalBrowser, page: globalPage };
 }
 
