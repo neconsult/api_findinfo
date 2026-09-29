@@ -59,7 +59,7 @@ async function getBrowserInstance() {
     // Acessa a raiz para passar pelo Cloudflare inicial
     await globalPage.goto('https://consultas.anvisa.gov.br/#/documentos/tecnicos/', { 
         waitUntil: 'domcontentloaded', 
-        timeout: 60000 
+        timeout: 120000 
     });
 
     return { browser: globalBrowser, page: globalPage };
