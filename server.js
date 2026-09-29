@@ -681,32 +681,53 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-            // Navega DIRETAMENTE para a URL da API do endpoint desejado na aba do navegador
-            await page.goto(urlApi, { 
+            // PASSO 1: Navega para a raiz da seção para o Cloudflare validar a sessão e os cookies
+            let urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/';
+            if (urlApi.includes('/api/documento/')) {
+                urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/documentos/tecnicos/';
+            } else if (urlApi.includes('/saneantes/')) {
+                urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
+            }
+
+            await page.goto(urlAlvoNavegacao, { 
                 waitUntil: 'domcontentloaded', 
                 timeout: 60000 
             });
             
-            // Pausa breve para estabilizar o carregamento do texto bruto da resposta da API
-            await new Promise(r => setTimeout(r, 1000));
+            // Pequena pausa para garantir a estabilização do DOM
+            await new Promise(r => setTimeout(r, 1500));
 
-            // Captura o conteúdo de texto exibido na página (o JSON puro retornado pela API)
-            const rawText = await page.evaluate(() => {
-                const pre = document.querySelector('pre');
-                if (pre) return pre.innerText;
-                return document.body.innerText;
-            });
+            // PASSO 2: Executa o fetch dentro do contexto da página já autenticada, enviando o Referer correto
+            resultadoJson = await page.evaluate(async (targetUrl) => {
+                const response = await fetch(targetUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json, text/plain, */*',
+                        'Authorization': 'Guest',
+                        'Referer': 'https://consultas.anvisa.gov.br/',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
 
-            if (!rawText || rawText.trim() === "") {
-                throw new Error("EMPTY_JSON_RESPONSE");
-            }
+                if (response.status === 403) {
+                    throw new Error("CLOUD_FLARE_403_BLOCK");
+                }
 
-            try {
-                resultadoJson = JSON.parse(rawText);
-            } catch (e) {
-                // Se falhou ao interpretar como JSON, significa que o Cloudflare interceptou e devolveu um HTML de bloqueio
-                throw new Error("CLOUD_FLARE_403_BLOCK");
-            }
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const rawText = await response.text();
+                if (!rawText || rawText.trim() === "") {
+                    throw new Error("EMPTY_JSON_RESPONSE");
+                }
+
+                try {
+                    return JSON.parse(rawText);
+                } catch (e) {
+                    throw new Error("INVALID_JSON_FORMAT");
+                }
+            }, urlApi);
 
             await page.close();
             sucesso = true;
@@ -718,9 +739,9 @@ app.get('/teste_otimizadoproc', async (req, res) => {
                 try { await page.close(); } catch (e) {}
             }
 
-            // Se o Cloudflare barrar com 403, derrubamos o browser master para limpar os cookies corrompidos
+            // Se o Cloudflare barrar com 403 ou houver falha de sessão, derrubamos o browser master
             if (error.message.includes("CLOUD_FLARE_403_BLOCK") || !globalBrowserProc || !globalBrowserProc.isConnected()) {
-                console.log("[SEGURANÇA] Bloqueio 403 detectado. Reinicializando o Chromium master...");
+                console.log("[SEGURANÇA] Bloqueio detectado. Reinicializando o Chromium master...");
                 if (globalBrowserProc) {
                     try { await globalBrowserProc.close(); } catch (e) {}
                 }
