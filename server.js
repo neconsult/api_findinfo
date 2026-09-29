@@ -73,8 +73,8 @@ async function getBrowserInstanceProc() {
         return globalBrowserProc;
     }
 
-    const PROXY_HOST = "186.216.208.98";
-    const PROXY_PORT = "3128";
+    const PROXY_HOST = "190.124.252.129";
+    const PROXY_PORT = "6666";
 
     console.log("[INICIALIZAÇÃO] Subindo instância master persistente do Chromium...");
     globalBrowserProc = await puppeteer.launch({
@@ -647,7 +647,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
         return res.status(400).json({
             sucesso: false,
             erro: true,
-            mensagem: "O parâmetro 'url' é obrigatório. Exemplo: /teste_otimizadoproc?url=https://consultas.anvisa.gov.br/api/..."
+            mensagem: "O parâmetro 'url' é obrigatório."
         });
     }
 
@@ -665,14 +665,13 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 
         try {
             const browser = await getBrowserInstanceProc();
-            
-            // Abre uma NOVA ABA isolada para esta requisição específica
             page = await browser.newPage();
             
             await page.setRequestInterception(true);
             page.on('request', (req) => {
                 const resourceType = req.resourceType();
-                if (['image', 'stylesheet', 'font', 'media', 'other'].includes(resourceType)) {
+                // Importante: NÃO podemos abortar scripts, pois o challenge do Cloudflare roda via JS puro!
+                if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
                     req.abort();
                 } else {
                     req.continue();
@@ -681,53 +680,70 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0');
 
-            // PASSO 1: Navega para a raiz da seção para o Cloudflare validar a sessão e os cookies
-            let urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/';
-            if (urlApi.includes('/api/documento/')) {
-                urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/documentos/tecnicos/';
-            } else if (urlApi.includes('/saneantes/')) {
-                urlAlvoNavegacao = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
-            }
+            let apiResponseData = null;
 
-            await page.goto(urlAlvoNavegacao, { 
+            // Ovinte para capturar o JSON da API assim que ela for liberada pelo Cloudflare
+            page.on('response', async (response) => {
+                const responseUrl = response.url();
+                if (responseUrl.includes(urlApi) || responseUrl.includes('/api/')) {
+                    try {
+                        if (response.status() === 200) {
+                            const contentType = response.headers()['content-type'] || '';
+                            if (contentType.includes('application/json')) {
+                                apiResponseData = await response.json();
+                            }
+                        }
+                    } catch (e) {}
+                }
+            });
+
+            // 1. Abre a página inicial para o Cloudflare injetar o desafio e rodar o script
+            await page.goto('https://consultas.anvisa.gov.br/#/', { 
                 waitUntil: 'domcontentloaded', 
                 timeout: 60000 
             });
-            
-            // Pequena pausa para garantir a estabilização do DOM
-            await new Promise(r => setTimeout(r, 1500));
 
-            // PASSO 2: Executa o fetch dentro do contexto da página já autenticada, enviando o Referer correto
-            resultadoJson = await page.evaluate(async (targetUrl) => {
-                const response = await fetch(targetUrl, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json, text/plain, */*',
-                        'Authorization': 'Guest',
-                        'Referer': 'https://consultas.anvisa.gov.br/',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
+            // 2. AGUARDA O CHALLENGE: Fica monitorando a tela até que o desafio do Cloudflare suma
+            console.log("[CLOUDFLARE] Aguardando resolução do challenge de segurança...");
+            try {
+                await page.waitForFunction(
+                    () => !document.title.includes('Just a moment') && !document.body.innerHTML.includes('challenge-running'),
+                    { timeout: 25000 } // Dá até 25 segundos para o desafio passar sozinho
+                );
+            } catch (err) {
+                console.log("[CLOUDFLARE] O desafio demorou, tentando prosseguir assim mesmo...");
+            }
 
-                if (response.status === 403) {
-                    throw new Error("CLOUD_FLARE_403_BLOCK");
-                }
+            // Pequena folga pós-desafio para garantir que o cookie de sessão estabilizou
+            await new Promise(r => setTimeout(r, 2000));
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+            // 3. Agora navega diretamente para a URL da API já com o passe livre (cookie de liberação) do Cloudflare
+            const navRes = await page.goto(urlApi, {
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
+            }).catch(e => null);
 
-                const rawText = await response.text();
+            if (navRes && navRes.status() === 403) {
+                throw new Error("CLOUD_FLARE_403_BLOCK");
+            }
+
+            // Se interceptou pelo evento de rede, usa o dado
+            if (apiResponseData) {
+                resultadoJson = apiResponseData;
+            } else {
+                // Senão, lê o texto bruto da tela
+                const rawText = await page.evaluate(() => {
+                    const pre = document.querySelector('pre');
+                    if (pre) return pre.innerText;
+                    return document.body.innerText;
+                }).catch(e => "");
+
                 if (!rawText || rawText.trim() === "") {
                     throw new Error("EMPTY_JSON_RESPONSE");
                 }
 
-                try {
-                    return JSON.parse(rawText);
-                } catch (e) {
-                    throw new Error("INVALID_JSON_FORMAT");
-                }
-            }, urlApi);
+                resultadoJson = JSON.parse(rawText);
+            }
 
             await page.close();
             sucesso = true;
@@ -739,7 +755,6 @@ app.get('/teste_otimizadoproc', async (req, res) => {
                 try { await page.close(); } catch (e) {}
             }
 
-            // Se o Cloudflare barrar com 403 ou houver falha de sessão, derrubamos o browser master
             if (error.message.includes("CLOUD_FLARE_403_BLOCK") || !globalBrowserProc || !globalBrowserProc.isConnected()) {
                 console.log("[SEGURANÇA] Bloqueio detectado. Reinicializando o Chromium master...");
                 if (globalBrowserProc) {
@@ -749,7 +764,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
             }
 
             if (tentativa < maxTentativas) {
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 1000));
             }
         }
     }
