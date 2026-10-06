@@ -802,33 +802,29 @@ app.get('/test-saneantes', async (req, res) => {
 const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // 1. Acessa a home de forma limpa e rápida para inicializar os cookies de sessão e bypass do Cloudflare
-    console.log('[Anvisa Proxy] Acessando a página base...');
-    await page.goto('https://consultas.anvisa.gov.br/', {
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/\${tipo}/q/?cnpj=\${cnpj}`;
+    console.log(`[Anvisa Proxy] Acessando diretamente: ${internalUrl}`);
+
+    // Prepara a escuta da API antes de navegar
+    const responsePromise = page.waitForResponse(
+      response => response.url().includes(`/api/consulta/saneantes/${tipo}`) && response.status() === 200,
+      { timeout: 45000 }
+    );
+
+    // domcontentloaded evita o travamento de rede da SPA
+    await page.goto(internalUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 30000
+      timeout: 45000
     });
 
-    // Pequena pausa para garantir a propagação da sessão
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // 2. Monta a URL direta da API
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/\${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
-    console.log(`[Anvisa Proxy] Navegando diretamente para o endpoint da API: ${targetApiUrl}`);
-
-    // 3. Navega direto para a URL da API (o navegador renderizará o JSON puro na tela)
-    await page.goto(targetApiUrl, {
-      waitUntil: 'networkidle0',
-      timeout: 30000
-    });
-
-    // 4. Extrai o conteúdo bruto do body (que contém o JSON retornado pela API)
-    const jsonText = await page.evaluate(() => document.body.innerText);
-    const jsonData = JSON.parse(jsonText);
+    console.log('[Anvisa Proxy] Página carregada. Capturando resposta da API...');
+    
+    const apiResponse = await responsePromise;
+    const jsonData = await apiResponse.json();
 
     await browser.close();
 
-    console.log('[Anvisa Proxy] JSON extraído com sucesso!');
+    console.log('[Anvisa Proxy] JSON obtido com sucesso.');
     return res.json({
       success: true,
       data: jsonData
