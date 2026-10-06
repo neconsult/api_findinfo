@@ -780,8 +780,8 @@ app.get('/test-saneantes', async (req, res) => {
   let browser;
   const cnpj = req.query.cnpj || '00536772000142';
   const tipo = req.query.tipo || 'produtos';  
-  const PROXY_HOST = "45.180.84.105";
-  const PROXY_PORT = "443";
+  const PROXY_HOST = "201.20.42.46";
+  const PROXY_PORT = "3128";
 
   let maxTentativas = 3;
   let tentativa = 0;
@@ -855,7 +855,7 @@ app.get('/test-saneantes', async (req, res) => {
           // Navega usando domcontentloaded para evitar bloqueios em recursos estáticos secundários
           await page.goto(friendlyUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 90000
+            timeout: 300000
           });
           console.log(`[Tentativa ${tentativa}] Página carregada. Simulando interação humana para destravar o Cloudflare Challenge...`);
           
@@ -869,13 +869,13 @@ app.get('/test-saneantes', async (req, res) => {
           
             // Aguarda o tempo necessário para o Cloudflare validar e o Angular renderizar
           let tempoEspera = 0;
-          while (!sucesso && tempoEspera < 30) {
+          while (!sucesso && tempoEspera < 60) {
             await new Promise(r => setTimeout(r, 1000));
             tempoEspera++;
           }
           // Fica em loop ativo aguardando o ouvinte de rede capturar o dado
           tempoEspera = 0;
-          while (!sucesso && tempoEspera < 25) {
+          while (!sucesso && tempoEspera < 40) {
             await new Promise(r => setTimeout(r, 1000));
             tempoEspera++;
             if (tempoEspera % 5 === 0) {
