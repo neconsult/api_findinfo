@@ -791,7 +791,7 @@ app.get('/test-saneantes', async (req, res) => {
   while (tentativa < maxTentativas && !sucesso) {
     tentativa++;
     let browser;  
-
+console.log(`[Anvisa Proxy] -> [Início da Tentativa ${tentativa} de ${maxTentativas}] CNPJ: ${cnpj}`);
   try {
     console.log(`[Anvisa Proxy] Iniciando navegador com Stealth e Proxy para o CNPJ: ${cnpj}`);
     
@@ -808,64 +808,86 @@ app.get('/test-saneantes', async (req, res) => {
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
+      
 const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-      // Timeout mais generoso (45 segundos)
-      page.setDefaultNavigationTimeout(45000);
+      page.setDefaultNavigationTimeout(40000);
 
+      // Ouvinte de rede para interceptar o JSON
       page.on('response', async (response) => {
         const url = response.url();
-        if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes(`00536772000142`) && response.status() === 200) {
+        if (url.includes(`/api/consulta/saneantes/prosutos`) && url.includes('00536772000142') && response.status() === 200) {
           try {
-            interceptedData = await response.json();
-            sucesso = true;
+            const json = await response.json();
+            if (json) {
+              interceptedData = json;
+              sucesso = true;
+            }
           } catch (e) {}
         }
       });
 
-      // Tenta acessar a home
-      await page.goto('https://consultas.anvisa.gov.br/', {
-        waitUntil: 'domcontentloaded',
-        timeout: 35000
-      });
-
-      await page.mouse.move(100, 100);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Redireciona via hash para disparar a API
-      const targetHash = `#/saneantes/produtos/q/?cnpj=00536772000142`;
-      await page.evaluate((hash) => {
-        window.location.hash = hash;
-      }, targetHash);
-
-      // Aguarda até 15 segundos o retorno da API nesta tentativa
-      let espera = 0;
-      while (!interceptedData && espera < 15) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        espera++;
+      // Tenta abrir a home (envolvemos com try/catch interno para a navegação não abortar o loop principal de cara)
+      let navegacaoOk = false;
+      try {
+        await page.goto('https://consultas.anvisa.gov.br/', {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000
+        });
+        navegacaoOk = true;
+      } catch (navErr) {
+        console.warn(`[Tentativa \${tentativa}] Falha no carregamento da página (Timeout/Reset):${navErr.message}`);
       }
 
-      await browser.close();
+      if (navegacaoOk) {
+        await page.mouse.move(100, 100);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        const targetHash = `#/saneantes/prosutos/q/?cnpj=00536772000142`;
+        console.log(`[Tentativa ${tentativa}] Disparando rota interna via hash...`);
+        
+        await page.evaluate((hash) => {
+          window.location.hash = hash;
+        }, targetHash);
+
+        // Aguarda até 15 segundos o retorno da API
+        let espera = 0;
+        while (!sucesso && espera < 15) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          espera++;
+        }
+      }
+
+      if (browser) {
+        await browser.close();
+      }
 
       if (sucesso && interceptedData) {
+        console.log(`[Anvisa Proxy] -> [Sucesso definitivo na tentativa ${tentativa}]`);
         break;
+      } else {
+        console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou em obter os dados. Passando para a próxima...]`);
       }
 
     } catch (err) {
-      console.warn(`[Anvisa Proxy] Falha na tentativa \({tentativa}:\){err.message}`);
+      console.warn(`[Anvisa Proxy] -> [Erro crítico capturado na tentativa ${tentativa}:${err.message}]`);
       if (browser) {
         try { await browser.close(); } catch(e){}
       }
-      // Pausa curta antes da próxima tentativa
-      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Pausa de 3 segundos antes de iniciar a próxima tentativa do loop
+    if (!sucesso && tentativa < maxTentativas) {
+      console.log(`[Anvisa Proxy] Aguardando 3 segundos antes da próxima tentativa...`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
   }
 
   if (!sucesso || !interceptedData) {
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas de conexão falharam devido à instabilidade do proxy ou timeout da Anvisa."
+      message: "Todas as tentativas esgotaram e a API não respondeu devido à instabilidade do proxy."
     });
   }
 
@@ -874,6 +896,7 @@ const page = await browser.newPage();
     data: interceptedData
   });
 });
+
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
