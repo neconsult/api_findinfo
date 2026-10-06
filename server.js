@@ -813,7 +813,7 @@ const page = await browser.newPage();
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     // 2. Dispara o fetch diretamente na API a partir do contexto da página autenticada
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter[cnpj=${cnpj}&order=asc&page=1`;
+    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter[cnpj]=${cnpj}&order=asc&page=1`;
     console.log(`[Anvisa Proxy] Executando fetch interno para: ${targetApiUrl}`);
 
     const apiResult = await page.evaluate(async (url) => {
