@@ -783,107 +783,109 @@ app.get('/test-saneantes', async (req, res) => {
   const PROXY_HOST = "190.124.252.129";
   const PROXY_PORT = "6666";
 
-  let maxTentativas = 10;
+let maxTentativas = 10;
   let tentativa = 0;
   let sucesso = false;
   let interceptedData = null;
 
   while (tentativa < maxTentativas && !sucesso) {
     tentativa++;
-    let browser;  
-console.log(`[Anvisa Proxy] -> [Início da Tentativa ${tentativa} de ${maxTentativas}] CNPJ: ${cnpj}`);
-  try {
-    console.log(`[Anvisa Proxy] Iniciando navegador com Stealth e Proxy para o CNPJ: ${cnpj}`);
-    
-    browser = await puppeteer2.launch({
-      args: [
-        ...chromium.args, 
-        '--hide-scrollbars', 
-        '--disable-web-security', 
-         `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
-        '--window-size=1366,768'
-      ],
-      defaultViewport: { width: 1366, height: 768 },
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-      ignoreHTTPSErrors: true,
-    });
-      
-const page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    let browser = null;
 
-      page.setDefaultNavigationTimeout(40000);
+    console.log(`[Anvisa Proxy] -> [Início da Tentativa ${tentativa} de ${maxTentativas}] CNPJ: ${cnpj}`);
 
-      // Ouvinte de rede para interceptar o JSON
-      page.on('response', async (response) => {
-        const url = response.url();
-        if (url.includes(`/api/consulta/saneantes/prosutos`) && url.includes('00536772000142') && response.status() === 200) {
-          try {
-            const json = await response.json();
-            if (json) {
-              interceptedData = json;
-              sucesso = true;
-            }
-          } catch (e) {}
+    try {
+      // Promessa com timeout estrito para o ciclo de vida do Puppeteer nesta tentativa
+      await new Promise(async (resolve, reject) => {
+        let timeoutHandle = setTimeout(() => {
+          reject(new Error("Timeout global estourado na tentativa (travamento de socket do proxy)"));
+        }, 40000);
+
+        try {
+          browser = await puppeteer2.launch({
+            args: [
+              ...chromium.args, 
+              '--hide-scrollbars', 
+              '--disable-web-security', 
+               `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
+              '--window-size=1366,768',
+              '--no-sandbox',
+              '--disable-setuid-sandbox'
+            ],
+            defaultViewport: { width: 1366, height: 768 },
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
+          });
+
+          const page = await browser.newPage();
+          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+          page.on('response', async (response) => {
+            try {
+              const url = response.url();
+              if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes('00536772000142') && response.status() === 200) {
+                const json = await response.json();
+                if (json) {
+                  interceptedData = json;
+                  sucesso = true;
+                  clearTimeout(timeoutHandle);
+                  resolve();
+                }
+              }
+            } catch (e) {}
+          });
+
+          console.log(`[Tentativa ${tentativa}] Acessando a home da Anvisa...`);
+          await page.goto('https://consultas.anvisa.gov.br/', {
+            waitUntil: 'domcontentloaded',
+            timeout: 25000
+          });
+
+          await page.mouse.move(100, 100);
+          await new Promise(r => setTimeout(r, 1500));
+
+          const targetHash = `#/saneantes/prosutos/q/?cnpj=00536772000142`;
+          console.log(`[Tentativa ${tentativa}] Disparando rota interna via hash...`);
+          
+          await page.evaluate((hash) => {
+            window.location.hash = hash;
+          }, targetHash);
+
+          // Aguarda o sucesso via evento de rede
+          let espera = 0;
+          while (!sucesso && espera < 15) {
+            await new Promise(r => setTimeout(r, 1000));
+            espera++;
+          }
+
+          clearTimeout(timeoutHandle);
+          resolve();
+
+        } catch (innerErr) {
+          clearTimeout(timeoutHandle);
+          reject(innerErr);
         }
       });
 
-      // Tenta abrir a home (envolvemos com try/catch interno para a navegação não abortar o loop principal de cara)
-      let navegacaoOk = false;
-      try {
-        await page.goto('https://consultas.anvisa.gov.br/', {
-          waitUntil: 'domcontentloaded',
-          timeout: 200000
-        });
-        navegacaoOk = true;
-      } catch (navErr) {
-        console.warn(`[Tentativa ${tentativa}] Falha no carregamento da página (Timeout/Reset):${navErr.message}`);
-        if (browser) {
-        try { await browser.close(); } catch(e){}
-        browser = null;
-      }
-      }
-
-      if (navegacaoOk) {
-        await page.mouse.move(100, 100);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        const targetHash = `#/saneantes/prosutos/q/?cnpj=00536772000142`;
-        console.log(`[Tentativa ${tentativa}] Disparando rota interna via hash...`);
-        
-        await page.evaluate((hash) => {
-          window.location.hash = hash;
-        }, targetHash);
-
-        // Aguarda até 15 segundos o retorno da API
-        let espera = 0;
-        while (!sucesso && espera < 15) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          espera++;
-        }
-      }
-
-      if (browser) {
-        await browser.close();
-      }
-
-      if (sucesso && interceptedData) {
-        console.log(`[Anvisa Proxy] -> [Sucesso definitivo na tentativa ${tentativa}]`);
-        break;
-      } else {
-        console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou em obter os dados. Passando para a próxima...]`);
-      }
-
     } catch (err) {
-      console.warn(`[Anvisa Proxy] -> [Erro crítico capturado na tentativa ${tentativa}:${err.message}]`);
+      console.warn(`[Anvisa Proxy] -> [Falha/Timeout capturado na tentativa ${tentativa}: ${err.message}]`);
+    } finally {
       if (browser) {
-        try { await browser.close(); } catch(e){}
+        try {
+          await browser.close();
+        } catch (e) {}
+        browser = null;
       }
     }
 
-    // Pausa de 3 segundos antes de iniciar a próxima tentativa do loop
+    if (sucesso && interceptedData) {
+      console.log(`[Anvisa Proxy] -> [Sucesso definitivo na tentativa ${tentativa}!]`);
+      break;
+    }
+
     if (!sucesso && tentativa < maxTentativas) {
-      console.log(`[Anvisa Proxy] Aguardando 3 segundos antes da próxima tentativa...`);
+      console.log(`[Anvisa Proxy] Tentativa ${tentativa} falhou. Pausando 3 segundos e indo para a próxima tentativa...`);
       await new Promise(resolve => setTimeout(resolve, 3000));
     }
   }
@@ -891,7 +893,7 @@ const page = await browser.newPage();
   if (!sucesso || !interceptedData) {
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram e a API não respondeu devido à instabilidade do proxy."
+      message: "Todas as tentativas esgotaram devido à instabilidade severa do proxy ou timeout da Anvisa."
     });
   }
 
@@ -900,7 +902,6 @@ const page = await browser.newPage();
     data: interceptedData
   });
 });
-
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
