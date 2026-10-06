@@ -799,31 +799,32 @@ app.get('/test-saneantes', async (req, res) => {
       ignoreHTTPSErrors: true,
     });
 
-   const page = await browser.newPage();
+ const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // 1. Navega para a seção de saneantes para injetar os scripts do Turnstile
-    const pageTargetUrl = `https://consultas.anvisa.gov.br/#/saneantes/notificados`;
-    console.log(`[Anvisa Proxy] Acessando a interface de saneantes: ${pageTargetUrl}`);
-    
-    await page.goto(pageTargetUrl, {
-      waitUntil: 'networkidle2',
-      timeout: 60000
+    // Monta a URL interna de pesquisa exatamente como a interface faz
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=${cnpj}`;
+    console.log(`[Anvisa Proxy] Acessando diretamente a rota interna: ${internalUrl}`);
+
+    // Usamos domcontentloaded para carregar rápido sem estourar timeout em recursos de fundo
+    await page.goto(internalUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000
     });
 
-    // 2. Simula movimento de mouse para validação comportamental
-    await page.mouse.move(150, 250);
+    // Simula interação humana na página de pesquisa para satisfazer o Turnstile
+    await page.mouse.move(100, 150);
     await page.mouse.down();
-    await page.mouse.move(250, 350);
+    await page.mouse.move(200, 250);
     await page.mouse.up();
 
-    // 3. Aguarda o tempo necessário para o Turnstile processar o desafio em segundo plano (10 segundos)
-    console.log('[Anvisa Proxy] Aguardando estabilização do Turnstile...');
+    console.log('[Anvisa Proxy] Aguardando o Turnstile e a renderização da API interna...');
+    // Aguarda o tempo necessário para o script interno resolver o desafio e disparar a requisição
     await new Promise(resolve => setTimeout(resolve, 10000));
 
-    // 4. Executa o fetch direto na API já com a sessão aquecida e os tokens gerados no navegador
+    // Dispara o fetch interno agora com o ambiente totalmente aquecido e o token válido na sessão
     const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
-    console.log(`[Anvisa Proxy] Disparando fetch interno na API: ${targetApiUrl}`);
+    console.log(`[Anvisa Proxy] Executando fetch na API: ${targetApiUrl}`);
 
     const apiResult = await page.evaluate(async (url) => {
       try {
@@ -856,7 +857,7 @@ app.get('/test-saneantes', async (req, res) => {
       console.error('[Anvisa API Error]:', apiResult);
       return res.status(403).json({
         success: false,
-        message: "Falha na chamada da API após carregamento da interface.",
+        message: "Falha na chamada da API na página interna.",
         details: apiResult
       });
     }
@@ -876,7 +877,6 @@ app.get('/test-saneantes', async (req, res) => {
     });
   }
 });
-
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
