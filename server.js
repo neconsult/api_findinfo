@@ -813,7 +813,7 @@ const page = await browser.newPage();
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     // 2. Monta a URL direta da API
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/\({tipo}?column=&count=10&filter%5Bcnpj%5D=\){cnpj}&order=asc&page=1`;
+    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/\${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
     console.log(`[Anvisa Proxy] Navegando diretamente para o endpoint da API: ${targetApiUrl}`);
 
     // 3. Navega direto para a URL da API (o navegador renderizará o JSON puro na tela)
