@@ -802,69 +802,33 @@ app.get('/test-saneantes', async (req, res) => {
  const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // Monta a URL interna de pesquisa exatamente como a interface faz
-    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=${cnpj}`;
-    console.log(`[Anvisa Proxy] Acessando diretamente a rota interna: ${internalUrl}`);
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/\({tipo}/q/?cnpj=\){cnpj}`;
+    console.log(`[Anvisa Proxy] Acessando rota visual: ${internalUrl}`);
 
-    // Usamos domcontentloaded para carregar rápido sem estourar timeout em recursos de fundo
+    // Configura a escuta assíncrona da resposta ANTES de navegar, garantindo que não vamos perder o evento
+    const responsePromise = page.waitForResponse(
+      response => response.url().includes(`/api/consulta/saneantes/${tipo}`) && response.status() === 200,
+      { timeout: 45000 }
+    );
+
+    // Navega usando domcontentloaded para carregar instantaneamente sem travar em assets de fundo
     await page.goto(internalUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 45000
     });
 
-    // Simula interação humana na página de pesquisa para satisfazer o Turnstile
-    await page.mouse.move(100, 150);
-    await page.mouse.down();
-    await page.mouse.move(200, 250);
-    await page.mouse.up();
-
-    console.log('[Anvisa Proxy] Aguardando o Turnstile e a renderização da API interna...');
-    // Aguarda o tempo necessário para o script interno resolver o desafio e disparar a requisição
-    await new Promise(resolve => setTimeout(resolve, 10000));
-
-    // Dispara o fetch interno agora com o ambiente totalmente aquecido e o token válido na sessão
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
-    console.log(`[Anvisa Proxy] Executando fetch na API: ${targetApiUrl}`);
-
-    const apiResult = await page.evaluate(async (url) => {
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Referer': 'https://consultas.anvisa.gov.br/',
-            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="8", "Google Chrome";v="122"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-          }
-        });
-
-        const text = await response.text();
-        if (!response.ok) {
-          return { success: false, status: response.status, body: text };
-        }
-        return { success: true, data: JSON.parse(text) };
-      } catch (err) {
-        return { success: false, error: err.toString() };
-      }
-    }, targetApiUrl);
+    console.log('[Anvisa Proxy] Página carregada. Aguardando a API responder com o token...');
+    
+    // Aguarda a promessa da resposta da API se resolver
+    const apiResponse = await responsePromise;
+    const jsonData = await apiResponse.json();
 
     await browser.close();
 
-    if (!apiResult.success) {
-      console.error('[Anvisa API Error]:', apiResult);
-      return res.status(403).json({
-        success: false,
-        message: "Falha na chamada da API na página interna.",
-        details: apiResult
-      });
-    }
-
+    console.log('[Anvisa Proxy] JSON obtido com sucesso via interceptação.');
     return res.json({
       success: true,
-      data: apiResult.data
+      data: jsonData
     });
 
   } catch (error) {
