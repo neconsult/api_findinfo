@@ -22,8 +22,8 @@ async function getBrowserInstance() {
         return { browser: globalBrowser, page: globalPage };
     }
 
-    const PROXY_HOST = "190.124.252.129";
-    const PROXY_PORT = "6666";
+    const PROXY_HOST = "200.128.84.82";
+    const PROXY_PORT = "3128";
 
     console.log("[INICIALIZAÇÃO] Subindo instância persistente do Chromium...");
     globalBrowser = await puppeteer.launch({
@@ -589,7 +589,7 @@ app.get('/teste_otimizado3', async (req, res) => {
 
     const urlApi = decodeURIComponent(urlParam);
     
-    const maxTentativas = 2;
+    const maxTentativas = 5;
     let tentativa = 0;
     let sucesso = false;
     let resultadoJson = null;
@@ -608,7 +608,7 @@ app.get('/teste_otimizado3', async (req, res) => {
                     method: 'GET',
                     headers: {
                         'Accept': 'application/json, text/plain, */*',
-                        'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJfcjNHNkdEYm41T0Y5LUF2RUxvOHRBOFo4NTlPNkNTR2t1VUdpeC1SWXFJIn0.eyJleHAiOjE3OTEyNTE3ODgsImlhdCI6MTc5MTI1MDA0OCwianRpIjoiODU1MjBjYjktZDU0Ni00NGJlLTlmNWYtODM1ZmU4ZTQ2NWU3IiwiaXNzIjoiaHR0cHM6Ly9hY2Vzc28ucHJkLmFwcHMuYW52aXNhLmdvdi5ici9hdXRoL3JlYWxtcy9leHRlcm5vIiwiYXVkIjpbImNvbnN1bHRhcy1leHRlcm5hcy1zZXJ2aWNlIiwiYWNjb3VudCJdLCJzdWIiOiIwNWM2Yjk5OS0zNDc4LTRiNzYtOTg0ZC0wYzlhNGZhOGJkZWIiLCJ0eXAiOiJCZWFyZXIiLCJhenAiOiI4NDcxMDIxNzQ5MSIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiKiJdLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsib2ZmbGluZV9hY2Nlc3MiLCJ1bWFfYXV0aG9yaXphdGlvbiIsImRlZmF1bHQtcm9sZXMtZXh0ZXJubyJdfSwicmVzb3VyY2VfYWNjZXNzIjp7ImNvbnN1bHRhcy1leHRlcm5hcy1zZXJ2aWNlIjp7InJvbGVzIjpbIkNPTlNVTFRBU0VYVEVSTkFTX0xFSVRVUkEiXX0sImFjY291bnQiOnsicm9sZXMiOlsibWFuYWdlLWFjY291bnQiLCJtYW5hZ2UtYWNjb3VudC1saW5rcyIsInZpZXctcHJvZmlsZSJdfX0sInNjb3BlIjoicHJvZmlsZSBlbWFpbCIsImNsaWVudElkIjoiODQ3MTAyMTc0OTEiLCJjbGllbnRIb3N0IjoiMTc5LjE1Mi4yMzAuMTcyIiwiZW1haWxfdmVyaWZpZWQiOmZhbHNlLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJzZXJ2aWNlLWFjY291bnQtODQ3MTAyMTc0OTEiLCJjbGllbnRBZGRyZXNzIjoiMTc5LjE1Mi4yMzAuMTcyIn0.eAYccchVi6CPFIz6c3GfuEwpflSmi67uW31aURMZ2FOulUf-yOnDxPXK7t3hrx0klWKRKfZ_Cxle1_g7EoW1R3l1un7cCcyAM-Zo-lhc2kXh2aTwHSUmq5BwIOQwLxLWBbU6RmO1u8vdNIKjNL0sdtuxUE8SkzMY4RZpfw7txaQmpapYM7zOKSuYAckluGHnH-nYhb8sE3qrC1akNbhIjL32CvV-4A8k9_azbm6k3U1dkzaGdjxiV1YRTzZrLth_a9tRYv39W6fe2OUjRypQecE6MgRTwxNMIgByu3CnPzufQ9awD-Atygx2nq4U7vd5zVU5loEEEk7erianMfMdsg',
+                        'Authorization': 'Guest',
                         'Referer': 'https://consultas.anvisa.gov.br/'
                     }
                 });
@@ -818,9 +818,10 @@ let maxTentativas = 10;
             ignoreHTTPSErrors: true,
           });
 
-          const page = await browser.newPage();
+         const page = await browser.newPage();
           await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
+          // Configura o ouvinte de rede ANTES de navegar para garantir que não vamos perder o evento
           page.on('response', async (response) => {
             try {
               const url = response.url();
@@ -836,31 +837,20 @@ let maxTentativas = 10;
             } catch (e) {}
           });
 
-          console.log(`[Tentativa ${tentativa}] Acessando a home da Anvisa...`);
-          await page.goto('https://consultas.anvisa.gov.br/#/', {
+          // Monta a URL amigável exata informada
+          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/prosutos/q/?cnpj=00536772000142`;
+          console.log(`[Tentativa ${tentativa}] Acessando URL amigável${friendlyUrl}`);
+
+          // Navega direto para a rota amigável usando domcontentloaded para evitar travamento de recursos estáticos
+          await page.goto(friendlyUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 55000
+            timeout: 90000
           });
 
-          await page.mouse.move(100, 100);
-          await new Promise(r => setTimeout(r, 1500));
-
-          const targetHash = `saneantes/prosutos/q/?cnpj=00536772000142`;
-          console.log(`[Tentativa ${tentativa}] Disparando rota interna via hash...`);
-          
-          await page.evaluate((hash) => {
-            window.location.hash = hash;
-          }, targetHash);
-
-          // Aguarda o sucesso via evento de rede
-          let espera = 0;
-          while (!sucesso && espera < 15) {
+          // Mantém a execução aguardando o ouvinte de rede capturar a resposta da API
+          while (!sucesso) {
             await new Promise(r => setTimeout(r, 1000));
-            espera++;
           }
-
-          clearTimeout(timeoutHandle);
-          resolve();
 
         } catch (innerErr) {
           clearTimeout(timeoutHandle);
@@ -869,8 +859,9 @@ let maxTentativas = 10;
       });
 
     } catch (err) {
-      console.warn(`[Anvisa Proxy] -> [Falha/Timeout capturado na tentativa ${tentativa}: ${err.message}]`);
+      console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou:${err.message}]`);
     } finally {
+      // Força a limpeza do processo do Chromium para liberar recursos
       if (browser) {
         try {
           const proc = browser.process();
@@ -890,15 +881,15 @@ let maxTentativas = 10;
     }
 
     if (!sucesso && tentativa < maxTentativas) {
-      console.log(`[Anvisa Proxy] Tentativa ${tentativa} falhou. Pausando 3 segundos e indo para a próxima tentativa...`);
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log(`[Anvisa Proxy] Tentativa ${tentativa} sem retorno da API. Pausando 2 segundos e tentando novamente...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
   if (!sucesso || !interceptedData) {
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram devido à instabilidade severa do proxy ou timeout da Anvisa."
+      message: "Todas as tentativas esgotaram sem que a API respondesse com o JSON."
     });
   }
 
