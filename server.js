@@ -802,55 +802,50 @@ app.get('/test-saneantes', async (req, res) => {
 const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // 1. Abre a raiz leve (evita o ERR_CONNECTION_RESET da rota em hash pesada)
-    console.log('[Anvisa Proxy] Acessando a página base limpa...');
-    await page.goto('https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=59476770000158', {
-      waitUntil: 'domcontentloaded',
-      timeout: 100000
+    let interceptedData = null;
+
+    // Fica escutando todas as respostas de rede do navegador em segundo plano
+    page.on('response', async (response) => {
+      const url = response.url();
+      if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes(`59476770000158`) && response.status() === 200) {
+        try {
+          interceptedData = await response.json();
+          console.log('[Anvisa Proxy] JSON interceptado com sucesso pela rede!');
+        } catch (e) {
+          console.error('[Anvisa Proxy] Erro ao converter resposta interceptada:', e.message);
+        }
+      }
     });
 
-    // Pausa rápida para estabilizar a sessão
-    await new Promise(resolve => setTimeout(resolve, 9000));
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=59476770000158`;
+    console.log(`[Anvisa Proxy] Acessando e aguardando resolução: ${internalUrl}`);
 
-    // 2. Dispara o fetch diretamente na API a partir do contexto da página autenticada
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter[cnpj]=59476770000158&order=asc&page=1`;
-    console.log(`[Anvisa Proxy] Executando fetch interno para: ${targetApiUrl}`);
+    // Usamos domcontentloaded para entrar na página e deixamos o Cloudflare rodar o desafio
+    await page.goto(internalUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    }).catch(err => {
+      console.log('[Anvisa Proxy] Aviso no goto (prosseguindo para aguardar a API):', err.message);
+    });
 
-    const apiResult = await page.evaluate(async (url) => {
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json, text/plain, */*',
-            'Referer': 'https://consultas.anvisa.gov.br/'
-          }
-        });
-
-        const text = await response.text();
-        if (!response.ok) {
-          return { success: false, status: response.status, body: text };
-        }
-        return { success: true, data: JSON.parse(text) };
-      } catch (err) {
-        return { success: false, error: err.toString() };
-      }
-    }, targetApiUrl);
+    // Loop de espera ativa até que a API responda e o listener capture o JSON (limite de 30 segundos)
+    const startTime = Date.now();
+    while (!interceptedData && (Date.now() - startTime) < 30000) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
     await browser.close();
 
-    if (!apiResult.success) {
-      console.error('[Anvisa API Error]:', apiResult);
-      return res.status(403).json({
+    if (!interceptedData) {
+      return res.status(504).json({
         success: false,
-        message: "Erro retornado pela API da Anvisa.",
-        details: apiResult
+        message: "Tempo esgotado aguardando a resposta da API da Anvisa."
       });
     }
 
-    console.log('[Anvisa Proxy] JSON extraído com sucesso!');
     return res.json({
       success: true,
-      data: apiResult.data
+      data: interceptedData
     });
 
   } catch (error) {
@@ -863,6 +858,8 @@ const page = await browser.newPage();
     });
   }
 });
+
+
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
 });
