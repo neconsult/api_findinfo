@@ -802,7 +802,7 @@ app.get('/test-saneantes', async (req, res) => {
 const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/\${tipo}/q/?cnpj=\${cnpj}`;
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/${tipo}/q/?cnpj=${cnpj}`;
     console.log(`[Anvisa Proxy] Acessando diretamente: ${internalUrl}`);
 
     // Prepara a escuta da API antes de navegar
