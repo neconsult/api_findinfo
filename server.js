@@ -804,16 +804,16 @@ const page = await browser.newPage();
 
     // 1. Abre a raiz leve (evita o ERR_CONNECTION_RESET da rota em hash pesada)
     console.log('[Anvisa Proxy] Acessando a página base limpa...');
-    await page.goto('https://consultas.anvisa.gov.br/', {
+    await page.goto('https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=59476770000158', {
       waitUntil: 'domcontentloaded',
-      timeout: 30000
+      timeout: 100000
     });
 
     // Pausa rápida para estabilizar a sessão
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, 9000));
 
     // 2. Dispara o fetch diretamente na API a partir do contexto da página autenticada
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter[cnpj]=${cnpj}&order=asc&page=1`;
+    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter[cnpj]=59476770000158&order=asc&page=1`;
     console.log(`[Anvisa Proxy] Executando fetch interno para: ${targetApiUrl}`);
 
     const apiResult = await page.evaluate(async (url) => {
