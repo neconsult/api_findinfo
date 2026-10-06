@@ -800,7 +800,6 @@ let maxTentativas = 10;
           ...chromium.args, 
           '--hide-scrollbars', 
           '--disable-web-security', 
-          `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
           '--window-size=1366,768',
           '--no-sandbox',
           '--disable-setuid-sandbox'
