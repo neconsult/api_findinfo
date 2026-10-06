@@ -781,21 +781,19 @@ app.get('/test-saneantes', async (req, res) => {
   const cnpj = req.query.cnpj || '00536772000142';
 
   try {
-    console.log(`[Anvisa Proxy] Iniciando navegador para o CNPJ: ${cnpj}`);
+    console.log(`[Anvisa Proxy] Iniciando navegador com Stealth para o CNPJ: ${cnpj}`);
     
+    // Inicialização combinando puppeteer-extra com o binário do Render (@sparticuz/chromium)
     browser = await puppeteer2.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu'
-      ]
+      args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1366, height: 768 });
+    
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
     console.log('[Anvisa Proxy] Acessando página base para capturar cookies...');
@@ -804,6 +802,7 @@ app.get('/test-saneantes', async (req, res) => {
       timeout: 60000
     });
 
+    // Pausa para estabilizar a sessão e os cookies do Cloudflare
     await new Promise(resolve => setTimeout(resolve, 4000));
 
     const targetUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
