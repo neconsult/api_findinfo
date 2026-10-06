@@ -944,7 +944,7 @@ const cnpj = req.query.cnpj || '00536772000142';
   const PROXY_HOST = "201.20.42.46";
   const PROXY_PORT = "3128";
 
- let maxTentativas = 3;
+let maxTentativas = 3;
   let tentativa = 0;
   let sucesso = false;
   let apiResult = null;
@@ -953,13 +953,14 @@ const cnpj = req.query.cnpj || '00536772000142';
     tentativa++;
     let browser = null;
 
-    console.log(`[Anvisa Telemetria] === INÍCIO DA TENTATIVA ${tentativa} de ${maxTentativas} (CNPJ: ${cnpj}) ===`);
+    console.log(`[Cloudflare Engine] === INÍCIO DA TENTATIVA ${tentativa} de ${maxTentativas} (CNPJ: ${cnpj}) ===`);
 
     try {
       await new Promise(async (resolve, reject) => {
+        // Timeout global estendido para 3 minutos devido à latência do proxy
         let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout global de 90s esgotado na tentativa atual."));
-        }, 90000);
+          reject(new Error("Timeout global de 180s esgotado considerando a lentidão do proxy."));
+        }, 180000);
 
         try {
           console.log(`[Tentativa ${tentativa}] Lançando Chromium Stealth com proxy ${PROXY_HOST}:${PROXY_PORT}...`);
@@ -984,84 +985,85 @@ const cnpj = req.query.cnpj || '00536772000142';
           const page = await browser.newPage();
           await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-          // Monitor global de requisições de rede para auditoria
+          // Monitor de rede estrito
           page.on('response', (response) => {
             const url = response.url();
             const status = response.status();
-            if (url.includes('consultas.anvisa.gov.br') && !url.includes('.js') && !url.includes('.css') && !url.includes('.png')) {
-              console.log(`[Rede IN] Status ${status} <- ${url}`);
+            if (url.includes('consultas.anvisa.gov.br')) {
+              console.log(`[Rede Monitor] Status ${status} <- ${url}`);
             }
           });
 
-          // 1. Acessa a home leve para capturar o desafio inicial de borda do Cloudflare
           const homeUrl = `https://consultas.anvisa.gov.br/`;
-          console.log(`[Tentativa ${tentativa}] Acessando home base leve: ${homeUrl}`);
+          console.log(`[Tentativa ${tentativa}] Acessando home base com timeout estendido de 75s...`);
 
           await page.goto(homeUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 45000
-          });
+            timeout: 75000
+          }).catch(e => console.log(`[Aviso Goto] ${e.message}`));
 
-          console.log(`[Tentativa ${tentativa}] Home aberta. Analisando presença de tela de bloqueio ou desafio...`);
+          console.log(`[Tentativa ${tentativa}] Página aberta. Iniciando janela estendida (60s) de resolução do Turnstile...`);
 
-          // 2. Loop de monitoramento e resolução ativa do Turnstile ("Just a moment...")
+          // FASE 1: Janela ampla (60 segundos) para acomodar a lentidão do proxy ao processar o desafio
           let desafioSuperado = false;
-          for (let i = 0; i < 25; i++) {
+          for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 1000));
             
             const pageTitle = await page.title().catch(() => '');
-            console.log(`[Monitor ${i+1}s] Título atual da página: "${pageTitle}"`);
+            
+            if (i % 5 === 0) {
+              console.log(`[Borda ${i+1}s] Título atual da aba: "${pageTitle}"`);
+            }
 
-            // Se o título não contiver termos de checagem, o desafio passou
-            if (!pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde')) {
+            if (pageTitle && !pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde')) {
               desafioSuperado = true;
-              console.log(`[Cloudflare] Página principal liberada pelo Cloudflare no segundo ${i+1}.`);
+              console.log(`[Cloudflare] Desafio absorvido e superado com sucesso no segundo ${i+1}! Título: "${pageTitle}"`);
               break;
             }
 
-            // Se estiver na tela de desafio, busca o iframe do Turnstile e interage
-            const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
-            if (iframeElement) {
-              console.log(`[Turnstile] Iframe de verificação humana detectado. Tentando resolver...`);
-              const frame = await iframeElement.contentFrame();
-              if (frame) {
-                await frame.evaluate(() => {
-                  const cb = document.querySelector('input[type="checkbox"]') || document.querySelector('.cb-i');
-                  if (cb) cb.click();
-                }).catch(() => {});
+            // Interação contínua com o iframe do Turnstile durante toda a janela
+            try {
+              const frames = page.frames();
+              for (const f of frames) {
+                if (f.url().includes('challenges.cloudflare.com')) {
+                  await f.evaluate(() => {
+                    const cb = document.querySelector('input[type="checkbox"]') || document.querySelector('.cb-i');
+                    if (cb) cb.click();
+                  }).catch(() => {});
+                }
               }
-              const box = await iframeElement.boundingBox();
-              if (box) {
-                await page.mouse.click(box.x + 35, box.y + 35);
+
+              const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
+              if (iframeElement) {
+                const box = await iframeElement.boundingBox();
+                if (box) {
+                  await page.mouse.click(box.x + 30, box.y + 30);
+                }
               }
-            }
+            } catch (errFrame) {}
           }
 
-          if (!desafioSuperado) {
-            console.warn(`[Tentativa ${tentativa}] Aviso: O título ainda indica verificação, mas vamos verificar os cookies de sessão.`);
-          }
-
-          // 3. Polling de verificação do cookie de liberação (cf_clearance)
-          console.log(`[Tentativa ${tentativa}] Verificando persistência do cookie de sessão cf_clearance...`);
+          // FASE 2: Janela estendida (20 segundos) para confirmação do cookie cf_clearance
+          console.log(`[Tentativa ${tentativa}] Aguardando consolidação do cookie cf_clearance via proxy...`);
           let sessaoValida = false;
-          for (let c = 0; c < 10; c++) {
+          for (let c = 0; c < 20; c++) {
             await new Promise(r => setTimeout(r, 1000));
             const cookies = await page.cookies();
             const clearanceCookie = cookies.find(cookie => cookie.name === 'cf_clearance');
             if (clearanceCookie) {
-              console.log(`[Sessão] Cookie cf_clearance obtido com sucesso! Borda liberada.`);
+              console.log(`[Sessão] Cookie cf_clearance confirmado após ${c+1} segundos de espera!`);
               sessaoValida = true;
               break;
             }
           }
 
           if (!sessaoValida) {
-            throw new Error("Sessão não autenticada: Cookie cf_clearance não foi emitido pelo Cloudflare.");
+            console.warn(`[Aviso Sessão] Cookie cf_clearance demorou a aparecer, mas vamos tentar o fetch mesmo assim.`);
           }
 
-          // 4. Com a sessão 100% OK e sem erro 403, dispara o fetch interno na API desejada
-          const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
-          console.log(`[Tentativa ${tentativa}] Executando fetch direto na API alvo: ${targetApiUrl}`);
+          // FASE 3: Consumo da API na Mesma Instância Aquecida
+          const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
+          console.log(`[Tentativa ${tentativa}] Executando fetch interno na API: ${targetApiUrl}`);
 
           apiResult = await page.evaluate(async (url) => {
             try {
@@ -1079,13 +1081,13 @@ const cnpj = req.query.cnpj || '00536772000142';
             }
           }, targetApiUrl);
 
-          console.log(`[Tentativa ${tentativa}] Resposta da API capturada. Status HTTP:`, apiResult.status);
+          console.log(`[Tentativa ${tentativa}] Status HTTP retornado pela API alvo:`, apiResult.status);
 
           if (apiResult && apiResult.status === 200 && apiResult.body && apiResult.body.startsWith('{')) {
             apiResult.data = JSON.parse(apiResult.body);
             sucesso = true;
           } else {
-            console.warn(`[Tentativa ${tentativa}] API retornou status inesperado ou corpo inválido:`, apiResult.body ? apiResult.body.substring(0, 200) : 'Vazio');
+            console.warn(`[Tentativa ${tentativa}] A API retornou conteúdo não-esperado:`, apiResult.body ? apiResult.body.substring(0, 200) : 'Vazio');
           }
 
           clearTimeout(timeoutHandle);
@@ -1098,7 +1100,7 @@ const cnpj = req.query.cnpj || '00536772000142';
       });
 
     } catch (err) {
-      console.warn(`[Anvisa Telemetria] -> [FALHA na tentativa ${tentativa}: ${err.message}]`);
+      console.warn(`[Cloudflare Engine] -> [FALHA na tentativa ${tentativa}: ${err.message}]`);
     } finally {
       if (browser) {
         console.log(`[Tentativa ${tentativa}] Fechando navegador e liberando recursos...`);
@@ -1112,21 +1114,21 @@ const cnpj = req.query.cnpj || '00536772000142';
     }
 
     if (sucesso && apiResult) {
-      console.log(`[Anvisa Telemetria] === SUCESSO DEFINITIVO NA TENTATIVA ${tentativa} ===`);
+      console.log(`[Cloudflare Engine] === SUCESSO DEFINITIVO NA TENTATIVA ${tentativa} ===`);
       break;
     }
 
     if (!sucesso && tentativa < maxTentativas) {
-      console.log(`[Anvisa Telemetria] Pausando 3 segundos antes da próxima tentativa...`);
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log(`[Cloudflare Engine] Pausando 5 segundos antes da próxima tentativa...`);
+      await new Promise(r => setTimeout(r, 5000));
     }
   }
 
   if (!sucesso || !apiResult) {
-    console.error(`[Anvisa Telemetria] === TODAS AS ${maxTentativas} TENTATIVAS FALHARAM ===`);
+    console.error(`[Cloudflare Engine] === TODAS AS ${maxTentativas} TENTATIVAS FALHARAM ===`);
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram ao tentar vencer o Cloudflare e consultar a API."
+      message: "Todas as tentativas esgotaram mesmo com os tempos estendidos para o proxy."
     });
   }
 
@@ -1135,7 +1137,6 @@ const cnpj = req.query.cnpj || '00536772000142';
     data: apiResult.data
   });
 });
-
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
 });
