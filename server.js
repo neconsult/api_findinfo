@@ -938,7 +938,7 @@ app.get('/test-saneantes', async (req, res) => {
   });
 });
 
-const axios = require('axios');
+const axiosx = require('axios');
 // Se precisar de agente de proxy específico para HTTP/HTTPS:
 const { HttpsProxyAgent } = require('https-proxy-agent');
 
@@ -981,7 +981,7 @@ app.get('/test-saneantes-axios', async (req, res) => {
     console.log(`[Axios Telemetria] Disparando requisição HTTP via Axios com Agent de Proxy...`);
 
     // 4. Executa a requisição GET diretamente para a API
-    const response = await axios.get(targetApiUrl, {
+    const response = await axiosx.get(targetApiUrl, {
       headers: headers,
       httpsAgent: agent,
       proxy: false, // Desativa o proxy nativo do axios em favor do httpsAgent para maior compatibilidade
