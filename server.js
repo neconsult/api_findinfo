@@ -783,78 +783,110 @@ app.get('/test-saneantes', async (req, res) => {
   const PROXY_HOST = "200.128.84.82";
   const PROXY_PORT = "3128";
 
-let maxTentativas = 10;
+  let maxTentativas = 3;
   let tentativa = 0;
   let sucesso = false;
-  let apiResult = null;
+  let interceptedData = null;
 
   while (tentativa < maxTentativas && !sucesso) {
     tentativa++;
     let browser = null;
 
-    console.log(`[Anvisa Proxy] -> [Início da Tentativa ${tentativa} de ${maxTentativas}] CNPJ: ${cnpj}`);
+    console.log(`[Anvisa Telemetria] === INÍCIO DA TENTATIVA ${tentativa} de ${maxTentativas} (CNPJ: ${cnpj}) ===`);
 
     try {
-      browser = await puppeteer2.launch({
-        args: [
-          ...chromium.args, 
-          '--hide-scrollbars', 
-          '--disable-web-security', 
-          '--window-size=1366,768',
-          '--no-sandbox',
-          '--disable-setuid-sandbox'
-        ],
-        defaultViewport: { width: 1366, height: 768 },
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
-      });
+      await new Promise(async (resolve, reject) => {
+        // Timeout de segurança de 40 segundos para esta tentativa
+        let timeoutHandle = setTimeout(() => {
+          reject(new Error("Timeout estrito de 40s atingido na tentativa atual."));
+        }, 40000);
 
-      const page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-
-      // 1. Abre a home leve da Anvisa (que carrega instantaneamente pelo proxy sem travar)
-      console.log(`[Tentativa ${tentativa}] Acessando home base para aquecer sessão...`);
-      await page.goto('https://consultas.anvisa.gov.br/', {
-        waitUntil: 'domcontentloaded',
-        timeout: 90000
-      });
-
-      // Pequena pausa para garantir a persistência dos cookies de borda
-      await new Promise(r => setTimeout(r, 9000));
-
-      // 2. Dispara o fetch direto na API de saneantes utilizando o contexto da sessão ativa
-      const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
-      console.log(`[Tentativa ${tentativa}] Executando fetch direto na API...`);
-
-      apiResult = await page.evaluate(async (url) => {
         try {
-          const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json, text/plain, */*',
-              'Referer': 'https://consultas.anvisa.gov.br/'
+          console.log(`[Tentativa ${tentativa}] Lançando instância do Chromium com proxy ${PROXY_HOST}:${PROXY_PORT}...`);
+          
+          browser = await puppeteer2.launch({
+            args: [
+              ...chromium.args, 
+              '--hide-scrollbars', 
+              '--disable-web-security', 
+              '--window-size=1366,768',
+              '--no-sandbox',
+              '--disable-setuid-sandbox'
+            ],
+            defaultViewport: { width: 1366, height: 768 },
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
+          });
+
+          const page = await browser.newPage();
+          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+          // Monitor de rede detalhado para capturar a chamada da API
+          page.on('response', async (response) => {
+            const url = response.url();
+            const status = response.status();
+            if (!url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.ico')) {
+              console.log(`[Rede IN] Status ${status} <-${url}`);
+            }
+            if (url.includes(`/api/consulta/saneantes/produtos`)) {
+              console.log(`[Telemetria Rede] Resposta capturada da API -> URL: ${url} | Status: ${response.status()}`);
+              if (url.includes(cnpj) && response.status() === 200) {
+                try {
+                  const json = await response.json();
+                  if (json) {
+                    console.log(`[Telemetria Sucesso] JSON da API interceptado com sucesso na tentativa ${tentativa}!`);
+                    interceptedData = json;
+                    sucesso = true;
+                    clearTimeout(timeoutHandle);
+                    resolve();
+                  }
+                } catch (parseErr) {
+                  console.warn(`[Telemetria Erro] Falha ao fazer parse do JSON interceptado:`, parseErr.message);
+                }
+              }
             }
           });
 
-          if (!response.ok) {
-            return { success: false, status: response.status };
-          }
-          const json = await response.json();
-          return { success: true, data: json };
-        } catch (err) {
-          return { success: false, error: err.toString() };
-        }
-      }, targetApiUrl);
+          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
+          console.log(`[Tentativa ${tentativa}] Navegando diretamente para a URL amigável: ${friendlyUrl}`);
 
-      if (apiResult && apiResult.success) {
-        sucesso = true;
-      }
+          // Navega usando domcontentloaded para evitar bloqueios em recursos estáticos secundários
+          await page.goto(friendlyUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          });
+
+          console.log(`[Tentativa ${tentativa}] Página carregada. Aguardando o Angular disparar o request de rede da API...`);
+
+          // Fica em loop ativo aguardando o ouvinte de rede capturar o dado
+          let tempoEspera = 0;
+          while (!sucesso && tempoEspera < 25) {
+            await new Promise(r => setTimeout(r, 1000));
+            tempoEspera++;
+            if (tempoEspera % 5 === 0) {
+              console.log(`[Tentativa ${tempoEspera}s] Aguardando resposta da API... (Tentativa ${tentativa})`);
+            }
+          }
+
+          if (!sucesso) {
+            console.warn(`[Tentativa ${tentativa}] Tempo limite de espera pela API esgotado nesta tentativa.`);
+          }
+
+          clearTimeout(timeoutHandle);
+          resolve();
+
+        } catch (innerErr) {
+          clearTimeout(timeoutHandle);
+          reject(innerErr);
+        }
+      });
 
     } catch (err) {
-      console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou: ${err.message}]`);
+      console.warn(`[Anvisa Telemetria] -> [FALHA na tentativa ${tentativa}: ${err.message}]`);
     } finally {
       if (browser) {
+        console.log(`[Tentativa ${tentativa}] Fechando navegador e liberando recursos...`);
         try {
           const proc = browser.process();
           if (proc && proc.pid) {
@@ -867,28 +899,28 @@ let maxTentativas = 10;
       }
     }
 
-    if (sucesso && apiResult) {
-      console.log(`[Anvisa Proxy] -> [Sucesso definitivo na tentativa ${tentativa}!]`);
+    if (sucesso && interceptedData) {
+      console.log(`[Anvisa Telemetria] === FLUXO CONCLUÍDO COM SUCESSO NA TENTATIVA ${tentativa} ===`);
       break;
     }
 
     if (!sucesso && tentativa < maxTentativas) {
-      console.log(`[Anvisa Proxy] Tentativa ${tentativa} falhou. Pausando 2 segundos e tentando novamente...`);
+      console.log(`[Anvisa Telemetria] Pausando 2 segundos antes de iniciar a próxima tentativa...`);
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
-  if (!sucesso || !apiResult || !apiResult.success) {
+  if (!sucesso || !interceptedData) {
+    console.error(`[Anvisa Telemetria] === TODAS AS ${maxTentativas} TENTATIVAS FALHARAM ===`);
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram ao tentar extrair os dados da API.",
-      details: apiResult
+      message: "Todas as tentativas esgotaram sem que a API respondesse com o JSON esperado. Verifique os logs do Render para detalhes."
     });
   }
 
   return res.json({
     success: true,
-    data: apiResult.data
+    data: interceptedData
   });
 });
 
