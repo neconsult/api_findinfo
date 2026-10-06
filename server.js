@@ -693,7 +693,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
                 urlVisualAlvo = 'https://consultas.anvisa.gov.br/#/saneantes/notificados/';
             }
 
-            console.log(`[TENTATIVA \({tentativa}] Carregando contexto visual:\){urlVisualAlvo}`);
+            console.log(`[TENTATIVA ${tentativa}] Carregando contexto visual:${urlVisualAlvo}`);
 
             // 1. Navega para a página visual para o Cloudflare liberar a sessão na aba
             await page.goto(urlVisualAlvo, { 
@@ -738,7 +738,7 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 
         } catch (error) {
             ultimoErro = error.message;
-            console.log(`[ERRO NA TENTATIVA \({tentativa}]\){error.message}`);
+            console.log(`[ERRO NA TENTATIVA ${tentativa}] ${error.message}`);
             
             if (page) {
                 try { await page.close(); } catch (e) {}
@@ -938,96 +938,162 @@ app.get('/test-saneantes', async (req, res) => {
   });
 });
 
-const axiosx = require('axios');
-// Se precisar de agente de proxy específico para HTTP/HTTPS:
-const { HttpsProxyAgent } = require('https-proxy-agent');
-
-app.get('/test-saneantes-axios', async (req, res) => {
+app.get('/test-saneantes-stealth-telemetria', async (req, res) => {
   const cnpj = req.query.cnpj || '00536772000142';
-  const tipo = req.query.tipo || 'produtos';
-  
-  // IPs de proxy que você está testando
+  const tipo = req.query.tipo || 'produtos';  
   const PROXY_HOST = "201.20.42.46";
   const PROXY_PORT = "3128";
-  const proxyUrl = `http://${PROXY_HOST}:${PROXY_PORT}`;
 
-  console.log(`[Axios Telemetria] === INÍCIO DA REQUISIÇÃO DIRETA ===`);
-  console.log(`[Axios Telemetria] Alvo: CNPJ ${cnpj} | Tipo:${tipo}`);
-  console.log(`[Axios Telemetria] Utilizando Proxy: ${proxyUrl}`);
+  let maxTentativas = 2;
+  let tentativa = 0;
+  let sucesso = false;
+  let interceptedData = null;
 
-  try {
-    // 1. Configura o agente de proxy para garantir que a requisição saia pelo IP correto
-    const agent = new HttpsProxyAgent(proxyUrl);
+  while (tentativa < maxTentativas && !sucesso) {
+    tentativa++;
+    let browser = null;
 
-    // 2. Monta a URL exata da API da Anvisa
-    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
-    console.log(`[Axios Telemetria] URL da API alvo montada: ${targetApiUrl}`);
+    console.log(`[Cloudflare Telemetria] === INÍCIO DA TENTATIVA ${tentativa} (CNPJ:${cnpj}) ===`);
 
-    // 3. Define headers altamente simulados para mimetizar uma requisição legítima de browser
-    const headers = {
-      'Accept': 'application/json, text/plain, */*',
-      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Pragma': 'no-cache',
-      'Referer': 'https://consultas.anvisa.gov.br/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"'
-    };
+    try {
+      await new Promise(async (resolve, reject) => {
+        let timeoutHandle = setTimeout(() => {
+          reject(new Error("Timeout de 90s esgotado aguardando o bypass do Cloudflare Challenge."));
+        }, 90000);
 
-    console.log(`[Axios Telemetria] Headers simulados configurados com sucesso.`);
-    console.log(`[Axios Telemetria] Disparando requisição HTTP via Axios com Agent de Proxy...`);
+        try {
+          console.log(`[Tentativa ${tentativa}] Lançando Chromium Stealth com proxy...`);
+          
+          browser = await puppeteer2.launch({
+            args: [
+              ...chromium.args, 
+              `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
+              '--hide-scrollbars', 
+              '--disable-web-security', 
+              '--window-size=1366,768',
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-blink-features=AutomationControlled'
+            ],
+            defaultViewport: { width: 1366, height: 768 },
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless,
+            ignoreHTTPSErrors: true,
+          });
 
-    // 4. Executa a requisição GET diretamente para a API
-    const response = await axiosx.get(targetApiUrl, {
-      headers: headers,
-      httpsAgent: agent,
-      proxy: false, // Desativa o proxy nativo do axios em favor do httpsAgent para maior compatibilidade
-      validateStatus: function (status) {
-        // Permite capturar qualquer status code (inclusive 403, 401, 500) sem jogar exceção automática
-        return status >= 200; 
-      },
-      timeout: 120000 // 30 segundos de timeout
-    });
+          const page = await browser.newPage();
+          
+          // User-agent robusto alinhado com o Chrome moderno
+          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    console.log(`[Axios Telemetria] Resposta recebida do servidor! Status HTTP: ${response.status}`);
-    console.log(`[Axios Telemetria] Headers de resposta do servidor:`, JSON.stringify(response.headers));
+          // Monitor de requisições de rede focado em capturar o sucesso da API ou o bloqueio
+          page.on('response', async (response) => {
+            const url = response.url();
+            const status = response.status();
 
-    // Se o status for 403 ou contiver HTML (bloqueio do Cloudflare)
-    if (response.status !== 200) {
-      const bodySnippet = typeof response.data === 'string' ? response.data.substring(0, 300) : JSON.stringify(response.data).substring(0, 300);
-      console.warn(`[Axios Telemetria] Alerta: Servidor retornou status não-200. Trecho do corpo:`, bodySnippet);
-      
-      return res.status(response.status).json({
-        success: false,
-        message: `A API retornou status ${response.status} (Bloqueio provável do Cloudflare)`,
-        snippet: bodySnippet
+            if (url.includes(`/api/consulta/saneantes/`)) {
+              console.log(`[Telemetria API] URL: ${url} | Status:${status}`);
+              if (url.includes('00536772000142') && status === 200) {
+                try {
+                  const json = await response.json();
+                  if (json) {
+                    console.log(`[Sucesso Absoluto] JSON da API capturado com sucesso!`);
+                    interceptedData = json;
+                    sucesso = true;
+                    clearTimeout(timeoutHandle);
+                    resolve();
+                  }
+                } catch (e) {}
+              }
+            }
+          });
+
+          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
+          console.log(`[Tentativa ${tentativa}] Acessando URL:${friendlyUrl}`);
+
+          await page.goto(friendlyUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+          });
+
+          // Telemetria do DOM: verifica o título da página para saber se travou no Cloudflare
+          let tempoEspera = 0;
+          while (!sucesso && tempoEspera < 70) {
+            await new Promise(r => setTimeout(r, 1000));
+            tempoEspera++;
+
+            const pageTitle = await page.title().catch(() => '');
+            const currentUrl = page.url();
+
+            if (tempoEspera % 5 === 0) {
+              console.log(`[Monitor ${tempoEspera}s] Título da página: "${pageTitle}" | URL: ${currentUrl.substring(0, 60)}`);
+            }
+
+            // Se ainda estiver na tela de desafio ("Just a moment..."), tenta interagir com o frame do Turnstile
+            if (pageTitle.includes("Just a moment") || pageTitle.includes("Aguarde")) {
+              if (tempoEspera === 10 || tempoEspera === 25 || tempoEspera === 40) {
+                console.log(`[Cloudflare] Tentando interagir com o widget do Turnstile para forçar validação...`);
+                try {
+                  // Procura por iframes de desafio (geralmente o Turnstile do Cloudflare)
+                  const frames = page.frames();
+                  for (const frame of frames) {
+                    const frameUrl = frame.url();
+                    if (frameUrl.includes('challenges.cloudflare.com')) {
+                      console.log(`[Cloudflare] Iframe de desafio encontrado. Tentando focar/clicar...`);
+                      await frame.evaluate(() => {
+                        // Tenta disparar evento de clique se houver checkbox/botão interno
+                        const checkbox = document.querySelector('input[type="checkbox"]') || document.body;
+                        if (checkbox) checkbox.click();
+                      }).catch(() => {});
+                    }
+                  }
+                } catch (errFrame) {}
+              }
+            }
+
+            // Simula movimentos humanos periódicos
+            if (tempoEspera % 15 === 0) {
+              await page.mouse.move(Math.floor(Math.random() * 400), Math.floor(Math.random() * 400));
+            }
+          }
+
+          clearTimeout(timeoutHandle);
+          resolve();
+
+        } catch (innerErr) {
+          clearTimeout(timeoutHandle);
+          reject(innerErr);
+        }
       });
+
+    } catch (err) {
+      console.warn(`[Telemetria Erro] Tentativa ${tentativa} falhou:${err.message}`);
+    } finally {
+      if (browser) {
+        try {
+          const proc = browser.process();
+          if (proc && proc.pid) process.kill(proc.pid, 'SIGKILL');
+          else await browser.close();
+        } catch (e) {}
+        browser = null;
+      }
     }
 
-    console.log(`[Axios Telemetria] Sucesso absoluto! Dados extraídos via Axios.`);
-    return res.json({
-      success: true,
-      data: response.data
-    });
-
-  } catch (error) {
-    console.error(`[Axios Telemetria Erro Crítico] Falha na execução da requisição:`, error.message);
-    if (error.code) {
-      console.error(`[Axios Telemetria Erro] Código do erro de rede: ${error.code}`);
+    if (sucesso && interceptedData) break;
+    if (!sucesso && tentativa < maxTentativas) {
+      await new Promise(r => setTimeout(r, 3000));
     }
-    
-    return res.status(500).json({
+  }
+
+  if (!sucesso || !interceptedData) {
+    return res.status(504).json({
       success: false,
-      error: error.message,
-      code: error.code || 'UNKNOWN'
+      message: "O Cloudflare Challenge barrou a execução em todas as tentativas."
     });
   }
+
+  return res.json({ success: true, data: interceptedData });
 });
-
-
 
 
 app.listen(PORT, () => {
