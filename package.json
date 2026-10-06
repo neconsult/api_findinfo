@@ -6,6 +6,8 @@
     "axios": "^1.7.0",
     "express": "^4.19.2",
     "puppeteer-core": "^22.0.0",
-    "@sparticuz/chromium": "^122.0.0"
+    "@sparticuz/chromium": "^122.0.0",
+    "puppeteer-extra": "^2.1.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
