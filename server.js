@@ -939,12 +939,12 @@ app.get('/test-saneantes', async (req, res) => {
 });
 
 app.get('/test-saneantes-stealth-telemetria', async (req, res) => {
-  const cnpj = req.query.cnpj || '00536772000142';
+const cnpj = req.query.cnpj || '00536772000142';
   const tipo = req.query.tipo || 'produtos';  
   const PROXY_HOST = "201.20.42.46";
   const PROXY_PORT = "3128";
 
-  let maxTentativas = 2;
+  let maxTentativas = 3;
   let tentativa = 0;
   let sucesso = false;
   let interceptedData = null;
@@ -953,16 +953,16 @@ app.get('/test-saneantes-stealth-telemetria', async (req, res) => {
     tentativa++;
     let browser = null;
 
-    console.log(`[Cloudflare Telemetria] === INÍCIO DA TENTATIVA ${tentativa} (CNPJ:${cnpj}) ===`);
+    console.log(`[Anvisa Telemetria] === INÍCIO DA TENTATIVA ${tentativa} de${maxTentativas} (CNPJ: ${cnpj}) ===`);
 
     try {
       await new Promise(async (resolve, reject) => {
         let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout de 90s esgotado aguardando o bypass do Cloudflare Challenge."));
-        }, 90000);
+          reject(new Error("Timeout estrito de 120s atingido na tentativa atual."));
+        }, 120000);
 
         try {
-          console.log(`[Tentativa ${tentativa}] Lançando Chromium Stealth com proxy...`);
+          console.log(`[Tentativa ${tentativa}] Lançando instância do Chromium com Stealth e proxy${PROXY_HOST}:${PROXY_PORT}...`);
           
           browser = await puppeteer2.launch({
             args: [
@@ -982,79 +982,99 @@ app.get('/test-saneantes-stealth-telemetria', async (req, res) => {
           });
 
           const page = await browser.newPage();
-          
-          // User-agent robusto alinhado com o Chrome moderno
           await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-          // Monitor de requisições de rede focado em capturar o sucesso da API ou o bloqueio
+          // Monitor de rede detalhado para capturar a chamada da API
           page.on('response', async (response) => {
             const url = response.url();
             const status = response.status();
-
-            if (url.includes(`/api/consulta/saneantes/`)) {
-              console.log(`[Telemetria API] URL: ${url} | Status:${status}`);
-              if (url.includes('00536772000142') && status === 200) {
+            if (!url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.ico') && !url.includes('.svg')) {
+              console.log(`[Rede IN] Status ${status} <-${url}`);
+            }
+            if (url.includes(`/api/consulta/saneantes/produtos`)) {
+              console.log(`[Telemetria Rede] Resposta capturada da API -> URL: ${url} | Status:${status}`);
+              if (url.includes(cnpj) && status === 200) {
                 try {
                   const json = await response.json();
                   if (json) {
-                    console.log(`[Sucesso Absoluto] JSON da API capturado com sucesso!`);
+                    console.log(`[Telemetria Sucesso] JSON da API interceptado com sucesso na tentativa ${tentativa}!`);
                     interceptedData = json;
                     sucesso = true;
                     clearTimeout(timeoutHandle);
                     resolve();
                   }
-                } catch (e) {}
+                } catch (parseErr) {
+                  console.warn(`[Telemetria Erro] Falha ao fazer parse do JSON interceptado:`, parseErr.message);
+                }
               }
             }
           });
 
           const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
-          console.log(`[Tentativa ${tentativa}] Acessando URL:${friendlyUrl}`);
+          console.log(`[Tentativa ${tentativa}] Navegando diretamente para a URL amigável:${friendlyUrl}`);
 
           await page.goto(friendlyUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 60000
           });
 
-          // Telemetria do DOM: verifica o título da página para saber se travou no Cloudflare
+          console.log(`[Tentativa ${tentativa}] Página carregada. Verificando presença do desafio do Cloudflare Turnstile...`);
+          
+          // Aguarda alguns segundos para o widget do Turnstile injetar o iframe de verificação na tela
+          await new Promise(r => setTimeout(r, 4000));
+
+          try {
+            const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
+            if (iframeElement) {
+              console.log('[Turnstile Bypass] Iframe do Cloudflare detectado. Tentando interagir com o checkbox de verificação...');
+              const frame = await iframeElement.contentFrame();
+              
+              if (frame) {
+                await new Promise(r => setTimeout(r, 2000));
+                
+                // Tenta disparar o clique nos seletores internos do checkbox do Turnstile
+                const clicked = await frame.evaluate(() => {
+                  const checkbox = document.querySelector('input[type="checkbox"]') || document.querySelector('.cb-i') || document.body;
+                  if (checkbox) {
+                    checkbox.click();
+                    return true;
+                  }
+                  return false;
+                }).catch(() => false);
+
+                if (!clicked) {
+                  console.log('[Turnstile Bypass] Tentando clique físico por coordenadas no iframe...');
+                  const box = await iframeElement.boundingBox();
+                  if (box) {
+                    await page.mouse.click(box.x + 40, box.y + 35);
+                  }
+                }
+              }
+            } else {
+              console.log('[Turnstile Bypass] Nenhum iframe do Cloudflare visível no momento (pode ter liberado direto).');
+            }
+          } catch (turnstileErr) {
+            console.log('[Turnstile Bypass] Erro ao tentar resolver o widget:', turnstileErr.message);
+          }
+
+          // Simula ações complementares de movimento de mouse
+          await page.mouse.move(200, 200);
+          await page.evaluate(() => window.scrollBy(0, 250));
+            
+          console.log(`[Tentativa ${tentativa}] Aguardando o Angular disparar o request de rede da API...`);
+          
+          // Loop de espera ativa unificado (até 60 segundos)
           let tempoEspera = 0;
-          while (!sucesso && tempoEspera < 70) {
+          while (!sucesso && tempoEspera < 60) {
             await new Promise(r => setTimeout(r, 1000));
             tempoEspera++;
-
-            const pageTitle = await page.title().catch(() => '');
-            const currentUrl = page.url();
-
             if (tempoEspera % 5 === 0) {
-              console.log(`[Monitor ${tempoEspera}s] Título da página: "${pageTitle}" | URL: ${currentUrl.substring(0, 60)}`);
+              console.log(`[Tentativa ${tempoEspera}s] Aguardando resposta da API... (Tentativa${tentativa})`);
             }
+          }
 
-            // Se ainda estiver na tela de desafio ("Just a moment..."), tenta interagir com o frame do Turnstile
-            if (pageTitle.includes("Just a moment") || pageTitle.includes("Aguarde")) {
-              if (tempoEspera === 10 || tempoEspera === 25 || tempoEspera === 40) {
-                console.log(`[Cloudflare] Tentando interagir com o widget do Turnstile para forçar validação...`);
-                try {
-                  // Procura por iframes de desafio (geralmente o Turnstile do Cloudflare)
-                  const frames = page.frames();
-                  for (const frame of frames) {
-                    const frameUrl = frame.url();
-                    if (frameUrl.includes('challenges.cloudflare.com')) {
-                      console.log(`[Cloudflare] Iframe de desafio encontrado. Tentando focar/clicar...`);
-                      await frame.evaluate(() => {
-                        // Tenta disparar evento de clique se houver checkbox/botão interno
-                        const checkbox = document.querySelector('input[type="checkbox"]') || document.body;
-                        if (checkbox) checkbox.click();
-                      }).catch(() => {});
-                    }
-                  }
-                } catch (errFrame) {}
-              }
-            }
-
-            // Simula movimentos humanos periódicos
-            if (tempoEspera % 15 === 0) {
-              await page.mouse.move(Math.floor(Math.random() * 400), Math.floor(Math.random() * 400));
-            }
+          if (!sucesso) {
+            console.warn(`[Tentativa ${tentativa}] Tempo limite de espera pela API esgotado nesta tentativa.`);
           }
 
           clearTimeout(timeoutHandle);
@@ -1067,34 +1087,46 @@ app.get('/test-saneantes-stealth-telemetria', async (req, res) => {
       });
 
     } catch (err) {
-      console.warn(`[Telemetria Erro] Tentativa ${tentativa} falhou:${err.message}`);
+      console.warn(`[Anvisa Telemetria] -> [FALHA na tentativa ${tentativa}:${err.message}]`);
     } finally {
       if (browser) {
+        console.log(`[Tentativa ${tentativa}] Fechando navegador e liberando recursos...`);
         try {
           const proc = browser.process();
-          if (proc && proc.pid) process.kill(proc.pid, 'SIGKILL');
-          else await browser.close();
+          if (proc && proc.pid) {
+            process.kill(proc.pid, 'SIGKILL');
+          } else {
+            await browser.close();
+          }
         } catch (e) {}
         browser = null;
       }
     }
 
-    if (sucesso && interceptedData) break;
+    if (sucesso && interceptedData) {
+      console.log(`[Anvisa Telemetria] === FLUXO CONCLUÍDO COM SUCESSO NA TENTATIVA ${tentativa} ===`);
+      break;
+    }
+
     if (!sucesso && tentativa < maxTentativas) {
-      await new Promise(r => setTimeout(r, 3000));
+      console.log(`[Anvisa Telemetria] Pausando 2 segundos antes de iniciar a próxima tentativa...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
   if (!sucesso || !interceptedData) {
+    console.error(`[Anvisa Telemetria] === TODAS AS ${maxTentativas} TENTATIVAS FALHARAM ===`);
     return res.status(504).json({
       success: false,
-      message: "O Cloudflare Challenge barrou a execução em todas as tentativas."
+      message: "Todas as tentativas esgotaram sem que a API respondesse com o JSON esperado. Verifique os logs do Render para detalhes."
     });
   }
 
-  return res.json({ success: true, data: interceptedData });
+  return res.json({
+    success: true,
+    data: interceptedData
+  });
 });
-
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
