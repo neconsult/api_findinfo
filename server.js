@@ -938,6 +938,103 @@ app.get('/test-saneantes', async (req, res) => {
   });
 });
 
+const axios = require('axios');
+// Se precisar de agente de proxy específico para HTTP/HTTPS:
+const { HttpsProxyAgent } = require('https-proxy-agent');
+
+app.get('/test-saneantes-axios', async (req, res) => {
+  const cnpj = req.query.cnpj || '00536772000142';
+  const tipo = req.query.tipo || 'produtos';
+  
+  // IPs de proxy que você está testando
+  const PROXY_HOST = "201.20.42.46";
+  const PROXY_PORT = "3128";
+  const proxyUrl = `http://${PROXY_HOST}:${PROXY_PORT}`;
+
+  console.log(`[Axios Telemetria] === INÍCIO DA REQUISIÇÃO DIRETA ===`);
+  console.log(`[Axios Telemetria] Alvo: CNPJ ${cnpj} | Tipo:${tipo}`);
+  console.log(`[Axios Telemetria] Utilizando Proxy: ${proxyUrl}`);
+
+  try {
+    // 1. Configura o agente de proxy para garantir que a requisição saia pelo IP correto
+    const agent = new HttpsProxyAgent(proxyUrl);
+
+    // 2. Monta a URL exata da API da Anvisa
+    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
+    console.log(`[Axios Telemetria] URL da API alvo montada: ${targetApiUrl}`);
+
+    // 3. Define headers altamente simulados para mimetizar uma requisição legítima de browser
+    const headers = {
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Pragma': 'no-cache',
+      'Referer': 'https://consultas.anvisa.gov.br/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"'
+    };
+
+    console.log(`[Axios Telemetria] Headers simulados configurados com sucesso.`);
+    console.log(`[Axios Telemetria] Disparando requisição HTTP via Axios com Agent de Proxy...`);
+
+    // 4. Executa a requisição GET diretamente para a API
+    const response = await axios.get(targetApiUrl, {
+      headers: headers,
+      httpsAgent: agent,
+      proxy: false, // Desativa o proxy nativo do axios em favor do httpsAgent para maior compatibilidade
+      validateStatus: function (status) {
+        // Permite capturar qualquer status code (inclusive 403, 401, 500) sem jogar exceção automática
+        return status >= 200; 
+      },
+      timeout: 120000 // 30 segundos de timeout
+    });
+
+    console.log(`[Axios Telemetria] Resposta recebida do servidor! Status HTTP: ${response.status}`);
+    console.log(`[Axios Telemetria] Headers de resposta do servidor:`, JSON.stringify(response.headers));
+
+    // Se o status for 403 ou contiver HTML (bloqueio do Cloudflare)
+    if (response.status !== 200) {
+      const bodySnippet = typeof response.data === 'string' ? response.data.substring(0, 300) : JSON.stringify(response.data).substring(0, 300);
+      console.warn(`[Axios Telemetria] Alerta: Servidor retornou status não-200. Trecho do corpo:`, bodySnippet);
+      
+      return res.status(response.status).json({
+        success: false,
+        message: `A API retornou status ${response.status} (Bloqueio provável do Cloudflare)`,
+        snippet: bodySnippet
+      });
+    }
+
+    console.log(`[Axios Telemetria] Sucesso absoluto! Dados extraídos via Axios.`);
+    return res.json({
+      success: true,
+      data: response.data
+    });
+
+profiler: {
+      success: true,
+      data: response.data
+    }
+
+  } catch (error) {
+    console.error(`[Axios Telemetria Erro Crítico] Falha na execução da requisição:`, error.message);
+    if (error.code) {
+      console.error(`[Axios Telemetria Erro] Código do erro de rede: ${error.code}`);
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      code: error.code || 'UNKNOWN'
+    });
+  }
+});
+
+
+
+
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
 });
