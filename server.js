@@ -818,50 +818,50 @@ let maxTentativas = 10;
             ignoreHTTPSErrors: true,
           });
 
-         const page = await browser.newPage();
-          await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-          // Configura o ouvinte de rede ANTES de navegar para garantir que não vamos perder o evento
-          page.on('response', async (response) => {
-            try {
-              const url = response.url();
-              if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes('00536772000142') && response.status() === 200) {
-                const json = await response.json();
-                if (json) {
-                  interceptedData = json;
-                  sucesso = true;
-                  clearTimeout(timeoutHandle);
-                  resolve();
-                }
-              }
-            } catch (e) {}
-          });
-
-          // Monta a URL amigável exata informada
-          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
-          console.log(`[Tentativa ${tentativa}] Acessando URL amigável${friendlyUrl}`);
-
-          // Navega direto para a rota amigável usando domcontentloaded para evitar travamento de recursos estáticos
-          await page.goto(friendlyUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: 90000
-          });
-
-          // Mantém a execução aguardando o ouvinte de rede capturar a resposta da API
-          while (!sucesso) {
-            await new Promise(r => setTimeout(r, 1000));
-          }
-
-        } catch (innerErr) {
-          clearTimeout(timeoutHandle);
-          reject(innerErr);
-        }
+      // 1. Abre a home leve da Anvisa (que carrega instantaneamente pelo proxy sem travar)
+      console.log(`[Tentativa ${tentativa}] Acessando home base para aquecer sessão...`);
+      await page.goto('https://consultas.anvisa.gov.br/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 90000
       });
+
+      // Pequena pausa para garantir a persistência dos cookies de borda
+      await new Promise(r => setTimeout(r, 9000));
+
+      // 2. Dispara o fetch direto na API de saneantes utilizando o contexto da sessão ativa
+      const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/produtos?column=&count=10&filter%5Bcnpj%5D=00536772000142&order=asc&page=1`;
+      console.log(`[Tentativa ${tentativa}] Executando fetch direto na API...`);
+
+      apiResult = await page.evaluate(async (url) => {
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'Referer': 'https://consultas.anvisa.gov.br/'
+            }
+          });
+
+          if (!response.ok) {
+            return { success: false, status: response.status };
+          }
+          const json = await response.json();
+          return { success: true, data: json };
+        } catch (err) {
+          return { success: false, error: err.toString() };
+        }
+      }, targetApiUrl);
+
+      if (apiResult && apiResult.success) {
+        sucesso = true;
+      }
 
     } catch (err) {
       console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou:${err.message}]`);
     } finally {
-      // Força a limpeza do processo do Chromium para liberar recursos
       if (browser) {
         try {
           const proc = browser.process();
@@ -875,27 +875,28 @@ let maxTentativas = 10;
       }
     }
 
-    if (sucesso && interceptedData) {
+    if (sucesso && apiResult) {
       console.log(`[Anvisa Proxy] -> [Sucesso definitivo na tentativa ${tentativa}!]`);
       break;
     }
 
     if (!sucesso && tentativa < maxTentativas) {
-      console.log(`[Anvisa Proxy] Tentativa ${tentativa} sem retorno da API. Pausando 2 segundos e tentando novamente...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log(`[Anvisa Proxy] Tentativa ${tentativa} falhou. Pausando 2 segundos e tentando novamente...`);
+      await new Promise(resolve => setTimeout(resolve, 9000));
     }
   }
 
-  if (!sucesso || !interceptedData) {
+  if (!sucesso || !apiResult || !apiResult.success) {
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram sem que a API respondesse com o JSON."
+      message: "Todas as tentativas esgotaram ao tentar extrair os dados da API.",
+      details: apiResult
     });
   }
 
   return res.json({
     success: true,
-    data: interceptedData
+    data: apiResult.data
   });
 });
 
