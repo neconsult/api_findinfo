@@ -786,7 +786,7 @@ app.get('/test-saneantes', async (req, res) => {
 let maxTentativas = 10;
   let tentativa = 0;
   let sucesso = false;
-  let interceptedData = null;
+  let apiResult = null;
 
   while (tentativa < maxTentativas && !sucesso) {
     tentativa++;
@@ -795,30 +795,23 @@ let maxTentativas = 10;
     console.log(`[Anvisa Proxy] -> [Início da Tentativa ${tentativa} de ${maxTentativas}] CNPJ: ${cnpj}`);
 
     try {
-      // Promessa com timeout estrito para o ciclo de vida do Puppeteer nesta tentativa
-      await new Promise(async (resolve, reject) => {
-        let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout global estourado na tentativa (travamento de socket do proxy)"));
-        }, 40000);
+      browser = await puppeteer2.launch({
+        args: [
+          ...chromium.args, 
+          '--hide-scrollbars', 
+          '--disable-web-security', 
+          `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
+          '--window-size=1366,768',
+          '--no-sandbox',
+          '--disable-setuid-sandbox'
+        ],
+        defaultViewport: { width: 1366, height: 768 },
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
 
-        try {
-          browser = await puppeteer2.launch({
-            args: [
-              ...chromium.args, 
-              '--hide-scrollbars', 
-              '--disable-web-security', 
-               `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
-              '--window-size=1366,768',
-              '--no-sandbox',
-              '--disable-setuid-sandbox'
-            ],
-            defaultViewport: { width: 1366, height: 768 },
-            executablePath: await chromium.executablePath(),
-            headless: chromium.headless,
-            ignoreHTTPSErrors: true,
-          });
-
-        const page = await browser.newPage();
+      const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
       // 1. Abre a home leve da Anvisa (que carrega instantaneamente pelo proxy sem travar)
@@ -860,7 +853,7 @@ let maxTentativas = 10;
       }
 
     } catch (err) {
-      console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou:${err.message}]`);
+      console.warn(`[Anvisa Proxy] -> [Tentativa ${tentativa} falhou: ${err.message}]`);
     } finally {
       if (browser) {
         try {
@@ -882,7 +875,7 @@ let maxTentativas = 10;
 
     if (!sucesso && tentativa < maxTentativas) {
       console.log(`[Anvisa Proxy] Tentativa ${tentativa} falhou. Pausando 2 segundos e tentando novamente...`);
-      await new Promise(resolve => setTimeout(resolve, 9000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 
