@@ -804,34 +804,42 @@ const page = await browser.newPage();
 
     let interceptedData = null;
 
-    // Fica escutando todas as respostas de rede do navegador em segundo plano
+    // Configura o ouvinte de rede para capturar o JSON da API assim que ela responder
     page.on('response', async (response) => {
       const url = response.url();
-      if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes(`59476770000158`) && response.status() === 200) {
+      if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes(`00536772000142`) && response.status() === 200) {
         try {
           interceptedData = await response.json();
-          console.log('[Anvisa Proxy] JSON interceptado com sucesso pela rede!');
+          console.log('[Anvisa Proxy] JSON interceptado com sucesso!');
         } catch (e) {
-          console.error('[Anvisa Proxy] Erro ao converter resposta interceptada:', e.message);
+          console.error('[Anvisa Proxy] Erro ao parsear JSON:', e.message);
         }
       }
     });
 
-    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=59476770000158`;
-    console.log(`[Anvisa Proxy] Acessando e aguardando resolução: ${internalUrl}`);
-
-    // Usamos domcontentloaded para entrar na página e deixamos o Cloudflare rodar o desafio
-    await page.goto(internalUrl, {
+    // 1. Abre a home (que carrega de forma limpa, sem timeout ou connection reset)
+    console.log('[Anvisa Proxy] Acessando a home da Anvisa...');
+    await page.goto('https://consultas.anvisa.gov.br/', {
       waitUntil: 'domcontentloaded',
-      timeout: 60000
-    }).catch(err => {
-      console.log('[Anvisa Proxy] Aviso no goto (prosseguindo para aguardar a API):', err.message);
+      timeout: 30000
     });
 
-    // Loop de espera ativa até que a API responda e o listener capture o JSON (limite de 30 segundos)
+    // 2. Simula micro-movimento para satisfazer o script comportamental de borda
+    await page.mouse.move(100, 100);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 3. Força a navegação interna via JavaScript do Angular (evita o ERR_CONNECTION_RESET do page.goto direto no hash)
+    const targetHash = `#/saneantes/produtos/q/?cnpj=00536772000142`;
+    console.log(`[Anvisa Proxy] Redirecionando internamente para: ${targetHash}`);
+    
+    await page.evaluate((hash) => {
+      window.location.hash = hash;
+    }, targetHash);
+
+    // 4. Aguarda a captura do JSON pela rede (limite de 30 segundos)
     const startTime = Date.now();
-    while (!interceptedData && (Date.now() - startTime) < 30000) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    while (!interceptedData && (Date.now() - startTime) < 90000) {
+      await new Promise(resolve => setTimeout(resolve, 9000));
     }
 
     await browser.close();
@@ -839,7 +847,7 @@ const page = await browser.newPage();
     if (!interceptedData) {
       return res.status(504).json({
         success: false,
-        message: "Tempo esgotado aguardando a resposta da API da Anvisa."
+        message: "Tempo esgotado aguardando o retorno da API."
       });
     }
 
@@ -858,7 +866,6 @@ const page = await browser.newPage();
     });
   }
 });
-
 
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
