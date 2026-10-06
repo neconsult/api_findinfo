@@ -833,11 +833,15 @@ const page = await browser.newPage();
       try {
         await page.goto('https://consultas.anvisa.gov.br/', {
           waitUntil: 'domcontentloaded',
-          timeout: 30000
+          timeout: 200000
         });
         navegacaoOk = true;
       } catch (navErr) {
-        console.warn(`[Tentativa \${tentativa}] Falha no carregamento da página (Timeout/Reset):${navErr.message}`);
+        console.warn(`[Tentativa ${tentativa}] Falha no carregamento da página (Timeout/Reset):${navErr.message}`);
+        if (browser) {
+        try { await browser.close(); } catch(e){}
+        browser = null;
+      }
       }
 
       if (navegacaoOk) {
