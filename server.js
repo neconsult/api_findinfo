@@ -783,6 +783,15 @@ app.get('/test-saneantes', async (req, res) => {
   const PROXY_HOST = "190.124.252.129";
   const PROXY_PORT = "6666";
 
+  let maxTentativas = 10;
+  let tentativa = 0;
+  let sucesso = false;
+  let interceptedData = null;
+
+  while (tentativa < maxTentativas && !sucesso) {
+    tentativa++;
+    let browser;  
+
   try {
     console.log(`[Anvisa Proxy] Iniciando navegador com Stealth e Proxy para o CNPJ: ${cnpj}`);
     
@@ -800,71 +809,70 @@ app.get('/test-saneantes', async (req, res) => {
       ignoreHTTPSErrors: true,
     });
 const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    let interceptedData = null;
+      // Timeout mais generoso (45 segundos)
+      page.setDefaultNavigationTimeout(45000);
 
-    // Configura o ouvinte de rede para capturar o JSON da API assim que ela responder
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes(`00536772000142`) && response.status() === 200) {
-        try {
-          interceptedData = await response.json();
-          console.log('[Anvisa Proxy] JSON interceptado com sucesso!');
-        } catch (e) {
-          console.error('[Anvisa Proxy] Erro ao parsear JSON:', e.message);
+      page.on('response', async (response) => {
+        const url = response.url();
+        if (url.includes(`/api/consulta/saneantes/produtos`) && url.includes(`00536772000142`) && response.status() === 200) {
+          try {
+            interceptedData = await response.json();
+            sucesso = true;
+          } catch (e) {}
         }
-      }
-    });
-
-    // 1. Abre a home (que carrega de forma limpa, sem timeout ou connection reset)
-    console.log('[Anvisa Proxy] Acessando a home da Anvisa...');
-    await page.goto('https://consultas.anvisa.gov.br/', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    });
-
-    // 2. Simula micro-movimento para satisfazer o script comportamental de borda
-    await page.mouse.move(100, 100);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // 3. Força a navegação interna via JavaScript do Angular (evita o ERR_CONNECTION_RESET do page.goto direto no hash)
-    const targetHash = `#/saneantes/produtos/q/?cnpj=00536772000142`;
-    console.log(`[Anvisa Proxy] Redirecionando internamente para: ${targetHash}`);
-    
-    await page.evaluate((hash) => {
-      window.location.hash = hash;
-    }, targetHash);
-
-    // 4. Aguarda a captura do JSON pela rede (limite de 30 segundos)
-    const startTime = Date.now();
-    while (!interceptedData && (Date.now() - startTime) < 90000) {
-      await new Promise(resolve => setTimeout(resolve, 9000));
-    }
-
-    await browser.close();
-
-    if (!interceptedData) {
-      return res.status(504).json({
-        success: false,
-        message: "Tempo esgotado aguardando o retorno da API."
       });
+
+      // Tenta acessar a home
+      await page.goto('https://consultas.anvisa.gov.br/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 35000
+      });
+
+      await page.mouse.move(100, 100);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Redireciona via hash para disparar a API
+      const targetHash = `#/saneantes/produtos/q/?cnpj=00536772000142`;
+      await page.evaluate((hash) => {
+        window.location.hash = hash;
+      }, targetHash);
+
+      // Aguarda até 15 segundos o retorno da API nesta tentativa
+      let espera = 0;
+      while (!interceptedData && espera < 15) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        espera++;
+      }
+
+      await browser.close();
+
+      if (sucesso && interceptedData) {
+        break;
+      }
+
+    } catch (err) {
+      console.warn(`[Anvisa Proxy] Falha na tentativa \({tentativa}:\){err.message}`);
+      if (browser) {
+        try { await browser.close(); } catch(e){}
+      }
+      // Pausa curta antes da próxima tentativa
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
+  }
 
-    return res.json({
-      success: true,
-      data: interceptedData
-    });
-
-  } catch (error) {
-    console.error('[Anvisa Proxy Critical Error]:', error.message);
-    if (browser) await browser.close();
-    
-    return res.status(500).json({
+  if (!sucesso || !interceptedData) {
+    return res.status(504).json({
       success: false,
-      error: error.message
+      message: "Todas as tentativas de conexão falharam devido à instabilidade do proxy ou timeout da Anvisa."
     });
   }
+
+  return res.json({
+    success: true,
+    data: interceptedData
+  });
 });
 
 app.listen(PORT, () => {
