@@ -780,8 +780,8 @@ app.get('/test-saneantes', async (req, res) => {
   let browser;
   const cnpj = req.query.cnpj || '00536772000142';
   const tipo = req.query.tipo || 'produtos';  
-  const PROXY_HOST = "200.128.84.82";
-  const PROXY_PORT = "3128";
+  const PROXY_HOST = "138.94.236.100";
+  const PROXY_PORT = "8080";
 
   let maxTentativas = 3;
   let tentativa = 0;
@@ -807,6 +807,7 @@ app.get('/test-saneantes', async (req, res) => {
           browser = await puppeteer2.launch({
             args: [
               ...chromium.args, 
+               `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
               '--hide-scrollbars', 
               '--disable-web-security', 
               '--window-size=1366,768',
