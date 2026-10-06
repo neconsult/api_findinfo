@@ -944,7 +944,7 @@ const cnpj = req.query.cnpj || '00536772000142';
   const PROXY_HOST = "201.20.42.46";
   const PROXY_PORT = "3128";
 
-let maxTentativas = 3;
+let maxTentativas = 2; // Reduzimos para 2 para focar na telemetria detalhada
   let tentativa = 0;
   let sucesso = false;
   let apiResult = null;
@@ -958,8 +958,8 @@ let maxTentativas = 3;
     try {
       await new Promise(async (resolve, reject) => {
         let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout global de 180s esgotado no ciclo de contorno da borda."));
-        }, 180000);
+          reject(new Error("Timeout de 120s esgotado no ciclo de contorno da borda."));
+        }, 120000);
 
         try {
           console.log(`[Tentativa ${tentativa}] Lançando Chromium Stealth com proxy ${PROXY_HOST}:${PROXY_PORT}...`);
@@ -984,7 +984,6 @@ let maxTentativas = 3;
           const page = await browser.newPage();
           await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-          // Monitor de rede estrito
           page.on('response', (response) => {
             const url = response.url();
             const status = response.status();
@@ -998,14 +997,13 @@ let maxTentativas = 3;
 
           await page.goto(homeUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 75000
+            timeout: 60000
           }).catch(e => console.log(`[Aviso Goto] ${e.message}`));
 
-          console.log(`[Tentativa ${tentativa}] Página aberta. Monitorando e resolvendo o Turnstile ("Confirme que é humano")...`);
+          console.log(`[Tentativa ${tentativa}] Analisando a estrutura do DOM à procura do Turnstile...`);
 
-          // FASE 1: Ciclo de varredura e clique cirúrgico no checkbox do Turnstile mapeado
           let desafioSuperado = false;
-          for (let i = 0; i < 60; i++) {
+          for (let i = 0; i < 45; i++) {
             await new Promise(r => setTimeout(r, 1000));
             
             const pageTitle = await page.title().catch(() => '');
@@ -1016,61 +1014,65 @@ let maxTentativas = 3;
 
             if (pageTitle && !pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde')) {
               desafioSuperado = true;
-              console.log(`[Cloudflare] Desafio superado com sucesso no segundo ${i+1}! Título: "${pageTitle}"`);
+              console.log(`[Cloudflare] Desafio superado com sucesso no segundo ${i+1}!`);
               break;
             }
 
-            // Tentativa cirúrgica de interação com base na estrutura do HTML do Turnstile
-            try {
-              // 1. Procura diretamente pelo iframe do Cloudflare na página principal
-              const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
-              if (iframeElement) {
-                const box = await iframeElement.boundingBox();
-                if (box) {
-                  // O checkbox "Confirme que é humano" costuma renderizar na parte esquerda/central do widget do iframe
-                  // Clicamos nas coordenadas relativas exatas do container do checkbox com base na imagem enviada
-                  const clickX = box.x + 65; // Ajustado para o centro horizontal aproximado da caixa de seleção
-                  const clickY = box.y + (box.height / 2);
-                  
-                  console.log(`[Turnstile] Clicando via coordenadas no iframe em X:${Math.round(clickX)}, Y:${Math.round(clickY)}`);
-                  await page.mouse.click(clickX, clickY);
+            // Diagnóstico profundo do Turnstile a cada 5 segundos
+            if (i % 5 === 0) {
+              try {
+                const frames = page.frames();
+                console.log(`[Telemetria Frames] Total de frames ativos na página: ${frames.length}`);
+                
+                let foundFrame = false;
+                for (const f of frames) {
+                  const fUrl = f.url();
+                  if (fUrl.includes('challenges.cloudflare.com')) {
+                    foundFrame = true;
+                    console.log(`[Telemetria Frames] Encontrado frame do Cloudflare: ${fUrl}`);
+                    
+                    // Tenta forçar o clique dentro do frame e injetar evento de mouse real
+                    await f.evaluate(() => {
+                      const cb = document.querySelector('input[type="checkbox"]') || document.querySelector('label') || document.body;
+                      if (cb) {
+                        cb.click();
+                        console.log('[DOM interno] Clique executado via evaluate no elemento do desafio.');
+                      }
+                    }).catch(err => console.log('[Erro evaluate frame]:', err.message));
+                  }
                 }
 
-                // 2. Tenta acessar o conteúdo interno do frame para disparar o evento de clique no input/label mapeado
-                const frame = await iframeElement.contentFrame();
-                if (frame) {
-                  await frame.evaluate(() => {
-                    const checkbox = document.querySelector('input[type="checkbox"]') || 
-                                     document.querySelector('label') || 
-                                     document.querySelector('[aria-label*="humano"]');
-                    if (checkbox) {
-                      checkbox.click();
-                    }
-                  }).catch(() => {});
+                const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
+                if (iframeElement) {
+                  const box = await iframeElement.boundingBox();
+                  if (box) {
+                    console.log(`[Telemetria Coordenadas] Iframe localizado em X:${box.x}, Y:${box.y}, W:${box.width}, H:${box.height}`);
+                    // Clica exatamente no centro do widget do Turnstile
+                    await page.mouse.click(box.x + (box.width / 2), box.y + (box.height / 2));
+                  }
+                } else if (!foundFrame) {
+                  console.log(`[Telemetria Alerta] O iframe do Cloudflare ainda não foi injetado pelo script de borda neste segundo.`);
                 }
+              } catch (diagErr) {
+                console.log('[Erro na varredura diagnóstica]:', diagErr.message);
               }
-            } catch (errFrame) {
-              // Ignora erros de frame cruzado durante o carregamento
             }
           }
 
-          // FASE 2: Verificação do cookie de liberação cf_clearance
-          console.log(`[Tentativa ${tentativa}] Aguardando consolidação do cookie cf_clearance...`);
-          let sessaoValida = false;
-          for (let c = 0; c < 20; c++) {
+          // Aguarda cookie de liberação
+          console.log(`[Tentativa ${tentativa}] Verificando persistência do cookie cf_clearance...`);
+          for (let c = 0; c < 15; c++) {
             await new Promise(r => setTimeout(r, 1000));
             const cookies = await page.cookies();
-            const clearanceCookie = cookies.find(cookie => cookie.name === 'cf_clearance');
-            if (clearanceCookie) {
-              console.log(`[Sessão] Cookie cf_clearance confirmado após ${c+1} segundos!`);
-              sessaoValida = true;
+            if (cookies.find(cookie => cookie.name === 'cf_clearance')) {
+              console.log(`[Sessão] Cookie cf_clearance capturado com sucesso!`);
               break;
             }
           }
 
-          // FASE 3: Consumo da API na Mesma Instância Aquecida
+          // Executa fetch na API
           const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
-          console.log(`[Tentativa ${tentativa}] Executando fetch interno na API: ${targetApiUrl}`);
+          console.log(`[Tentativa ${tentativa}] Disparando fetch na API: ${targetApiUrl}`);
 
           apiResult = await page.evaluate(async (url) => {
             try {
@@ -1088,13 +1090,13 @@ let maxTentativas = 3;
             }
           }, targetApiUrl);
 
-          console.log(`[Tentativa ${tentativa}] Status HTTP retornado pela API alvo:`, apiResult.status);
+          console.log(`[Tentativa ${tentativa}] Status HTTP da API:`, apiResult.status);
 
           if (apiResult && apiResult.status === 200 && apiResult.body && apiResult.body.startsWith('{')) {
             apiResult.data = JSON.parse(apiResult.body);
             sucesso = true;
           } else {
-            console.warn(`[Tentativa ${tentativa}] A API retornou conteúdo não-esperado:`, apiResult.body ? apiResult.body.substring(0, 200) : 'Vazio');
+            console.warn(`[Tentativa ${tentativa}] Resposta da API bloqueada/inválida:`, apiResult.body ? apiResult.body.substring(0, 150) : 'Vazio');
           }
 
           clearTimeout(timeoutHandle);
@@ -1110,7 +1112,7 @@ let maxTentativas = 3;
       console.warn(`[Cloudflare Engine] -> [FALHA na tentativa ${tentativa}: ${err.message}]`);
     } finally {
       if (browser) {
-        console.log(`[Tentativa ${tentativa}] Fechando navegador e liberando recursos...`);
+        console.log(`[Tentativa ${tentativa}] Fechando navegador...`);
         try {
           const proc = browser.process();
           if (proc && proc.pid) process.kill(proc.pid, 'SIGKILL');
@@ -1120,29 +1122,20 @@ let maxTentativas = 3;
       }
     }
 
-    if (sucesso && apiResult) {
-      console.log(`[Cloudflare Engine] === SUCESSO DEFINITIVO NA TENTATIVA ${tentativa} ===`);
-      break;
-    }
-
+    if (sucesso && apiResult) break;
     if (!sucesso && tentativa < maxTentativas) {
-      console.log(`[Cloudflare Engine] Pausando 5 segundos antes da próxima tentativa...`);
-      await new Promise(r => setTimeout(r, 5000));
+      await new Promise(r => setTimeout(r, 3000));
     }
   }
 
   if (!sucesso || !apiResult) {
-    console.error(`[Cloudflare Engine] === TODAS AS ${maxTentativas} TENTATIVAS FALHARAM ===`);
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram ao tentar vencer o Cloudflare e consultar a API."
+      message: "Falha definitiva ao contornar o Turnstile da Cloudflare."
     });
   }
 
-  return res.json({
-    success: true,
-    data: apiResult.data
-  });
+  return res.json({ success: true, data: apiResult.data });
 });
 
 app.listen(PORT, () => {
