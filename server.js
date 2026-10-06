@@ -799,7 +799,7 @@ app.get('/test-saneantes', async (req, res) => {
         // Timeout de segurança de 40 segundos para esta tentativa
         let timeoutHandle = setTimeout(() => {
           reject(new Error("Timeout estrito de 40s atingido na tentativa atual."));
-        }, 40000);
+        }, 120000);
 
         try {
           console.log(`[Tentativa ${tentativa}] Lançando instância do Chromium com proxy ${PROXY_HOST}:${PROXY_PORT}...`);
@@ -855,7 +855,7 @@ app.get('/test-saneantes', async (req, res) => {
           // Navega usando domcontentloaded para evitar bloqueios em recursos estáticos secundários
           await page.goto(friendlyUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 300000
+            timeout: 900000
           });
           console.log(`[Tentativa ${tentativa}] Página carregada. Simulando interação humana para destravar o Cloudflare Challenge...`);
           
@@ -875,7 +875,7 @@ app.get('/test-saneantes', async (req, res) => {
           }
           // Fica em loop ativo aguardando o ouvinte de rede capturar o dado
           tempoEspera = 0;
-          while (!sucesso && tempoEspera < 40) {
+          while (!sucesso && tempoEspera < 60) {
             await new Promise(r => setTimeout(r, 1000));
             tempoEspera++;
             if (tempoEspera % 5 === 0) {
