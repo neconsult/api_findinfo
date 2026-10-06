@@ -837,15 +837,15 @@ let maxTentativas = 10;
           });
 
           console.log(`[Tentativa ${tentativa}] Acessando a home da Anvisa...`);
-          await page.goto('https://consultas.anvisa.gov.br/', {
+          await page.goto('https://consultas.anvisa.gov.br/#/', {
             waitUntil: 'domcontentloaded',
-            timeout: 25000
+            timeout: 55000
           });
 
           await page.mouse.move(100, 100);
           await new Promise(r => setTimeout(r, 1500));
 
-          const targetHash = `#/saneantes/prosutos/q/?cnpj=00536772000142`;
+          const targetHash = `saneantes/prosutos/q/?cnpj=00536772000142`;
           console.log(`[Tentativa ${tentativa}] Disparando rota interna via hash...`);
           
           await page.evaluate((hash) => {
