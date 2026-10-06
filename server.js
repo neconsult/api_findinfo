@@ -770,17 +770,15 @@ app.get('/teste_otimizadoproc', async (req, res) => {
     }
 });
 
-const express = require('express');
+
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
 puppeteer.use(StealthPlugin());
 
-const router = express.Router();
-
-router.get('/test-saneantes', async (req, res) => {
+app.get('/test-saneantes', async (req, res) => {
   let browser;
-  const cnpj = req.query.cnpj || '00536772000142'; // Padrão com o CNPJ do seu exemplo
+  const cnpj = req.query.cnpj || '00536772000142';
 
   try {
     console.log(`[Anvisa Proxy] Iniciando navegador para o CNPJ: ${cnpj}`);
@@ -797,21 +795,17 @@ router.get('/test-saneantes', async (req, res) => {
     });
 
     const page = await browser.newPage();
-
     await page.setViewport({ width: 1366, height: 768 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    // 1. Passar pelo desafio inicial do Cloudflare acessando a home
     console.log('[Anvisa Proxy] Acessando página base para capturar cookies...');
     await page.goto('https://consultas.anvisa.gov.br/', {
       waitUntil: 'networkidle2',
       timeout: 60000
     });
 
-    // Pausa de segurança para o Cloudflare processar os scripts de mitigação
     await new Promise(resolve => setTimeout(resolve, 4000));
 
-    // 2. Fazer a requisição direta para a API usando o contexto da página logada/validada
     const targetUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
     
     console.log(`[Anvisa Proxy] Requisitando JSON: ${targetUrl}`);
@@ -833,7 +827,6 @@ router.get('/test-saneantes', async (req, res) => {
 
     await browser.close();
 
-    // Retorna o JSON limpo para o seu sistema principal (ex: ASP Clássico / Locaweb)
     return res.json({
       success: true,
       data: jsonResult
@@ -849,8 +842,6 @@ router.get('/test-saneantes', async (req, res) => {
     });
   }
 });
-
-module.exports = router;
 
 
 app.listen(PORT, () => {
