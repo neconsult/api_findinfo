@@ -798,8 +798,8 @@ app.get('/test-saneantes', async (req, res) => {
       await new Promise(async (resolve, reject) => {
         // Timeout de segurança de 40 segundos para esta tentativa
         let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout estrito de 40s atingido na tentativa atual."));
-        }, 120000);
+          reject(new Error("Timeout estrito de 300s atingido na tentativa atual."));
+        }, 300000);
 
         try {
           console.log(`[Tentativa ${tentativa}] Lançando instância do Chromium com proxy ${PROXY_HOST}:${PROXY_PORT}...`);
