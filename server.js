@@ -957,9 +957,8 @@ let maxTentativas = 3;
 
     try {
       await new Promise(async (resolve, reject) => {
-        // Timeout global estendido para 3 minutos devido à latência do proxy
         let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout global de 180s esgotado considerando a lentidão do proxy."));
+          reject(new Error("Timeout global de 180s esgotado no ciclo de contorno da borda."));
         }, 180000);
 
         try {
@@ -995,16 +994,16 @@ let maxTentativas = 3;
           });
 
           const homeUrl = `https://consultas.anvisa.gov.br/`;
-          console.log(`[Tentativa ${tentativa}] Acessando home base com timeout estendido de 75s...`);
+          console.log(`[Tentativa ${tentativa}] Acessando home base...`);
 
           await page.goto(homeUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 75000
           }).catch(e => console.log(`[Aviso Goto] ${e.message}`));
 
-          console.log(`[Tentativa ${tentativa}] Página aberta. Iniciando janela estendida (60s) de resolução do Turnstile...`);
+          console.log(`[Tentativa ${tentativa}] Página aberta. Monitorando e resolvendo o Turnstile ("Confirme que é humano")...`);
 
-          // FASE 1: Janela ampla (60 segundos) para acomodar a lentidão do proxy ao processar o desafio
+          // FASE 1: Ciclo de varredura e clique cirúrgico no checkbox do Turnstile mapeado
           let desafioSuperado = false;
           for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 1000));
@@ -1017,48 +1016,56 @@ let maxTentativas = 3;
 
             if (pageTitle && !pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde')) {
               desafioSuperado = true;
-              console.log(`[Cloudflare] Desafio absorvido e superado com sucesso no segundo ${i+1}! Título: "${pageTitle}"`);
+              console.log(`[Cloudflare] Desafio superado com sucesso no segundo ${i+1}! Título: "${pageTitle}"`);
               break;
             }
 
-            // Interação contínua com o iframe do Turnstile durante toda a janela
+            // Tentativa cirúrgica de interação com base na estrutura do HTML do Turnstile
             try {
-              const frames = page.frames();
-              for (const f of frames) {
-                if (f.url().includes('challenges.cloudflare.com')) {
-                  await f.evaluate(() => {
-                    const cb = document.querySelector('input[type="checkbox"]') || document.querySelector('.cb-i');
-                    if (cb) cb.click();
-                  }).catch(() => {});
-                }
-              }
-
+              // 1. Procura diretamente pelo iframe do Cloudflare na página principal
               const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
               if (iframeElement) {
                 const box = await iframeElement.boundingBox();
                 if (box) {
-                  await page.mouse.click(box.x + 30, box.y + 30);
+                  // O checkbox "Confirme que é humano" costuma renderizar na parte esquerda/central do widget do iframe
+                  // Clicamos nas coordenadas relativas exatas do container do checkbox com base na imagem enviada
+                  const clickX = box.x + 65; // Ajustado para o centro horizontal aproximado da caixa de seleção
+                  const clickY = box.y + (box.height / 2);
+                  
+                  console.log(`[Turnstile] Clicando via coordenadas no iframe em X:${Math.round(clickX)}, Y:${Math.round(clickY)}`);
+                  await page.mouse.click(clickX, clickY);
+                }
+
+                // 2. Tenta acessar o conteúdo interno do frame para disparar o evento de clique no input/label mapeado
+                const frame = await iframeElement.contentFrame();
+                if (frame) {
+                  await frame.evaluate(() => {
+                    const checkbox = document.querySelector('input[type="checkbox"]') || 
+                                     document.querySelector('label') || 
+                                     document.querySelector('[aria-label*="humano"]');
+                    if (checkbox) {
+                      checkbox.click();
+                    }
+                  }).catch(() => {});
                 }
               }
-            } catch (errFrame) {}
+            } catch (errFrame) {
+              // Ignora erros de frame cruzado durante o carregamento
+            }
           }
 
-          // FASE 2: Janela estendida (20 segundos) para confirmação do cookie cf_clearance
-          console.log(`[Tentativa ${tentativa}] Aguardando consolidação do cookie cf_clearance via proxy...`);
+          // FASE 2: Verificação do cookie de liberação cf_clearance
+          console.log(`[Tentativa ${tentativa}] Aguardando consolidação do cookie cf_clearance...`);
           let sessaoValida = false;
           for (let c = 0; c < 20; c++) {
             await new Promise(r => setTimeout(r, 1000));
             const cookies = await page.cookies();
             const clearanceCookie = cookies.find(cookie => cookie.name === 'cf_clearance');
             if (clearanceCookie) {
-              console.log(`[Sessão] Cookie cf_clearance confirmado após ${c+1} segundos de espera!`);
+              console.log(`[Sessão] Cookie cf_clearance confirmado após ${c+1} segundos!`);
               sessaoValida = true;
               break;
             }
-          }
-
-          if (!sessaoValida) {
-            console.warn(`[Aviso Sessão] Cookie cf_clearance demorou a aparecer, mas vamos tentar o fetch mesmo assim.`);
           }
 
           // FASE 3: Consumo da API na Mesma Instância Aquecida
@@ -1128,7 +1135,7 @@ let maxTentativas = 3;
     console.error(`[Cloudflare Engine] === TODAS AS ${maxTentativas} TENTATIVAS FALHARAM ===`);
     return res.status(504).json({
       success: false,
-      message: "Todas as tentativas esgotaram mesmo com os tempos estendidos para o proxy."
+      message: "Todas as tentativas esgotaram ao tentar vencer o Cloudflare e consultar a API."
     });
   }
 
@@ -1137,6 +1144,7 @@ let maxTentativas = 3;
     data: apiResult.data
   });
 });
+
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
 });
