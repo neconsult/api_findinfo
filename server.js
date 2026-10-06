@@ -826,7 +826,7 @@ app.get('/test-saneantes', async (req, res) => {
           page.on('response', async (response) => {
             const url = response.url();
             const status = response.status();
-            if (!url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.ico')) {
+            if (!url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.ico') && !url.includes('.svg')) {
               console.log(`[Rede IN] Status ${status} <-${url}`);
             }
             if (url.includes(`/api/consulta/saneantes/produtos`)) {
@@ -854,13 +854,26 @@ app.get('/test-saneantes', async (req, res) => {
           // Navega usando domcontentloaded para evitar bloqueios em recursos estáticos secundários
           await page.goto(friendlyUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 30000
+            timeout: 90000
           });
-
+          console.log(`[Tentativa ${tentativa}] Página carregada. Simulando interação humana para destravar o Cloudflare Challenge...`);
+          
+          // Simula ações físicas na tela (movimento de mouse e cliques) exigidas pelos scripts de borda
+          await page.mouse.move(200, 200);
+          await page.mouse.down();
+          await page.mouse.up();
+          await page.evaluate(() => window.scrollBy(0, 250));
+            
           console.log(`[Tentativa ${tentativa}] Página carregada. Aguardando o Angular disparar o request de rede da API...`);
-
-          // Fica em loop ativo aguardando o ouvinte de rede capturar o dado
+          
+            // Aguarda o tempo necessário para o Cloudflare validar e o Angular renderizar
           let tempoEspera = 0;
+          while (!sucesso && tempoEspera < 30) {
+            await new Promise(r => setTimeout(r, 1000));
+            tempoEspera++;
+          }
+          // Fica em loop ativo aguardando o ouvinte de rede capturar o dado
+          tempoEspera = 0;
           while (!sucesso && tempoEspera < 25) {
             await new Promise(r => setTimeout(r, 1000));
             tempoEspera++;
