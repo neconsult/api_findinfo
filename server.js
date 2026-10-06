@@ -873,7 +873,12 @@ let maxTentativas = 10;
     } finally {
       if (browser) {
         try {
-          await browser.close();
+          const proc = browser.process();
+          if (proc && proc.pid) {
+            process.kill(proc.pid, 'SIGKILL');
+          } else {
+            await browser.close();
+          }
         } catch (e) {}
         browser = null;
       }
