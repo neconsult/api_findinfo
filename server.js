@@ -771,10 +771,10 @@ app.get('/teste_otimizadoproc', async (req, res) => {
 });
 
 
-const puppeteer = require('puppeteer-extra');
+const puppeteer2 = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-puppeteer.use(StealthPlugin());
+puppeteer2.use(StealthPlugin());
 
 app.get('/test-saneantes', async (req, res) => {
   let browser;
@@ -783,7 +783,7 @@ app.get('/test-saneantes', async (req, res) => {
   try {
     console.log(`[Anvisa Proxy] Iniciando navegador para o CNPJ: ${cnpj}`);
     
-    browser = await puppeteer.launch({
+    browser = await puppeteer2.launch({
       headless: 'new',
       args: [
         '--no-sandbox',
