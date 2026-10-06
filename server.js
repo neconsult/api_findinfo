@@ -1013,11 +1013,6 @@ app.get('/test-saneantes-axios', async (req, res) => {
       data: response.data
     });
 
-profiler: {
-      success: true,
-      data: response.data
-    }
-
   } catch (error) {
     console.error(`[Axios Telemetria Erro Crítico] Falha na execução da requisição:`, error.message);
     if (error.code) {
