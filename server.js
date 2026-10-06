@@ -780,8 +780,8 @@ app.get('/test-saneantes', async (req, res) => {
   let browser;
   const cnpj = req.query.cnpj || '00536772000142';
   const tipo = req.query.tipo || 'produtos';  
-  const PROXY_HOST = "138.94.236.100";
-  const PROXY_PORT = "8080";
+  const PROXY_HOST = "45.180.84.105";
+  const PROXY_PORT = "443";
 
   let maxTentativas = 3;
   let tentativa = 0;
