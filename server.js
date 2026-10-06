@@ -770,6 +770,89 @@ app.get('/teste_otimizadoproc', async (req, res) => {
     }
 });
 
+const express = require('express');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+puppeteer.use(StealthPlugin());
+
+const router = express.Router();
+
+router.get('/test-saneantes', async (req, res) => {
+  let browser;
+  const cnpj = req.query.cnpj || '00536772000142'; // Padrão com o CNPJ do seu exemplo
+
+  try {
+    console.log(`[Anvisa Proxy] Iniciando navegador para o CNPJ: ${cnpj}`);
+    
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
+      ]
+    });
+
+    const page = await browser.newPage();
+
+    await page.setViewport({ width: 1366, height: 768 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+
+    // 1. Passar pelo desafio inicial do Cloudflare acessando a home
+    console.log('[Anvisa Proxy] Acessando página base para capturar cookies...');
+    await page.goto('https://consultas.anvisa.gov.br/', {
+      waitUntil: 'networkidle2',
+      timeout: 60000
+    });
+
+    // Pausa de segurança para o Cloudflare processar os scripts de mitigação
+    await new Promise(resolve => setTimeout(resolve, 4000));
+
+    // 2. Fazer a requisição direta para a API usando o contexto da página logada/validada
+    const targetUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
+    
+    console.log(`[Anvisa Proxy] Requisitando JSON: ${targetUrl}`);
+    const jsonResult = await page.evaluate(async (url) => {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://consultas.anvisa.gov.br/'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Erro HTTP da API da Anvisa: ${response.status}`);
+      }
+      
+      return await response.json();
+    }, targetUrl);
+
+    await browser.close();
+
+    // Retorna o JSON limpo para o seu sistema principal (ex: ASP Clássico / Locaweb)
+    return res.json({
+      success: true,
+      data: jsonResult
+    });
+
+  } catch (error) {
+    console.error('[Anvisa Proxy Error]:', error.message);
+    if (browser) await browser.close();
+    
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;
+
+
 app.listen(PORT, () => {
     console.log(`Microsserviço rodando na porta ${PORT}`);
 });
