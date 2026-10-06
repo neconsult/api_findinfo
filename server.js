@@ -944,7 +944,7 @@ const cnpj = req.query.cnpj || '00536772000142';
   const PROXY_HOST = "201.20.42.46";
   const PROXY_PORT = "3128";
 
-let maxTentativas = 2; // Reduzimos para 2 para focar na telemetria detalhada
+let maxTentativas = 2;
   let tentativa = 0;
   let sucesso = false;
   let apiResult = null;
@@ -1000,10 +1000,10 @@ let maxTentativas = 2; // Reduzimos para 2 para focar na telemetria detalhada
             timeout: 60000
           }).catch(e => console.log(`[Aviso Goto] ${e.message}`));
 
-          console.log(`[Tentativa ${tentativa}] Analisando a estrutura do DOM à procura do Turnstile...`);
+          console.log(`[Tentativa ${tentativa}] Monitorando e resolvendo ativamente o Turnstile...`);
 
           let desafioSuperado = false;
-          for (let i = 0; i < 45; i++) {
+          for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 1000));
             
             const pageTitle = await page.title().catch(() => '');
@@ -1018,50 +1018,31 @@ let maxTentativas = 2; // Reduzimos para 2 para focar na telemetria detalhada
               break;
             }
 
-            // Diagnóstico profundo do Turnstile a cada 5 segundos
-            if (i % 5 === 0) {
-              try {
-                const frames = page.frames();
-                console.log(`[Telemetria Frames] Total de frames ativos na página: ${frames.length}`);
-                
-                let foundFrame = false;
-                for (const f of frames) {
-                  const fUrl = f.url();
-                  if (fUrl.includes('challenges.cloudflare.com')) {
-                    foundFrame = true;
-                    console.log(`[Telemetria Frames] Encontrado frame do Cloudflare: ${fUrl}`);
-                    
-                    // Tenta forçar o clique dentro do frame e injetar evento de mouse real
-                    await f.evaluate(() => {
-                      const cb = document.querySelector('input[type="checkbox"]') || document.querySelector('label') || document.body;
-                      if (cb) {
-                        cb.click();
-                        console.log('[DOM interno] Clique executado via evaluate no elemento do desafio.');
-                      }
-                    }).catch(err => console.log('[Erro evaluate frame]:', err.message));
-                  }
+            // Rotina de clique cirúrgico por coordenadas no iframe do Turnstile assim que ele aparece
+            try {
+              const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
+              if (iframeElement) {
+                const box = await iframeElement.boundingBox();
+                if (box) {
+                  const clickX = box.x + 45; 
+                  const clickY = box.y + (box.height / 2);
+                  
+                  console.log(`[Turnstile] Frame detectado! Clicando nas coordenadas X:${Math.round(clickX)}, Y:${Math.round(clickY)}`);
+                  
+                  await page.mouse.move(clickX, clickY);
+                  await page.mouse.down();
+                  await new Promise(r => setTimeout(r, 100));
+                  await page.mouse.up();
                 }
-
-                const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
-                if (iframeElement) {
-                  const box = await iframeElement.boundingBox();
-                  if (box) {
-                    console.log(`[Telemetria Coordenadas] Iframe localizado em X:${box.x}, Y:${box.y}, W:${box.width}, H:${box.height}`);
-                    // Clica exatamente no centro do widget do Turnstile
-                    await page.mouse.click(box.x + (box.width / 2), box.y + (box.height / 2));
-                  }
-                } else if (!foundFrame) {
-                  console.log(`[Telemetria Alerta] O iframe do Cloudflare ainda não foi injetado pelo script de borda neste segundo.`);
-                }
-              } catch (diagErr) {
-                console.log('[Erro na varredura diagnóstica]:', diagErr.message);
               }
+            } catch (errFrame) {
+              console.log('[Erro ao interagir com o frame]:', errFrame.message);
             }
           }
 
           // Aguarda cookie de liberação
           console.log(`[Tentativa ${tentativa}] Verificando persistência do cookie cf_clearance...`);
-          for (let c = 0; c < 15; c++) {
+          for (let c = 0; c < 20; c++) {
             await new Promise(r => setTimeout(r, 1000));
             const cookies = await page.cookies();
             if (cookies.find(cookie => cookie.name === 'cf_clearance')) {
