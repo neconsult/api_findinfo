@@ -798,28 +798,25 @@ app.get('/test-saneantes', async (req, res) => {
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
     });
-
- const page = await browser.newPage();
+const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/\({tipo}/q/?cnpj=\){cnpj}`;
+    // URL corrigida sem falhas de interpolação
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/\${tipo}/q/?cnpj=\${cnpj}`;
     console.log(`[Anvisa Proxy] Acessando rota visual: ${internalUrl}`);
 
-    // Configura a escuta assíncrona da resposta ANTES de navegar, garantindo que não vamos perder o evento
     const responsePromise = page.waitForResponse(
       response => response.url().includes(`/api/consulta/saneantes/${tipo}`) && response.status() === 200,
       { timeout: 45000 }
     );
 
-    // Navega usando domcontentloaded para carregar instantaneamente sem travar em assets de fundo
     await page.goto(internalUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 45000
     });
 
-    console.log('[Anvisa Proxy] Página carregada. Aguardando a API responder com o token...');
+    console.log('[Anvisa Proxy] Página carregada. Aguardando a API responder...');
     
-    // Aguarda a promessa da resposta da API se resolver
     const apiResponse = await responsePromise;
     const jsonData = await apiResponse.json();
 
