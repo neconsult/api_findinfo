@@ -1010,7 +1010,7 @@ const cnpj = req.query.cnpj || '00536772000142';
             }
           });
 
-          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
+         const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
           console.log(`[Tentativa ${tentativa}] Navegando diretamente para a URL amigável:${friendlyUrl}`);
 
           await page.goto(friendlyUrl, {
@@ -1018,54 +1018,63 @@ const cnpj = req.query.cnpj || '00536772000142';
             timeout: 60000
           });
 
-          console.log(`[Tentativa ${tentativa}] Página carregada. Verificando presença do desafio do Cloudflare Turnstile...`);
+          console.log(`[Tentativa ${tentativa}] Página carregada. Aguardando e buscando ativamente o Turnstile da Cloudflare...`);
           
-          // Aguarda alguns segundos para o widget do Turnstile injetar o iframe de verificação na tela
-          await new Promise(r => setTimeout(r, 4000));
+          // Varredura ativa de até 15 segundos para encontrar e resolver o desafio assim que ele aparecer na tela
+          let turnstileResolvido = false;
+          for (let i = 0; i < 15; i++) {
+            await new Promise(r => setTimeout(r, 1000));
 
-          try {
-            const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
-            if (iframeElement) {
-              console.log('[Turnstile Bypass] Iframe do Cloudflare detectado. Tentando interagir com o checkbox de verificação...');
-              const frame = await iframeElement.contentFrame();
-              
-              if (frame) {
-                await new Promise(r => setTimeout(r, 2000));
-                
-                // Tenta disparar o clique nos seletores internos do checkbox do Turnstile
-                const clicked = await frame.evaluate(() => {
-                  const checkbox = document.querySelector('input[type="checkbox"]') || document.querySelector('.cb-i') || document.body;
-                  if (checkbox) {
-                    checkbox.click();
-                    return true;
-                  }
-                  return false;
-                }).catch(() => false);
+            try {
+              // Procura em todos os frames da página (incluindo iframes do Cloudflare)
+              const frames = page.frames();
+              let iframeEncontrado = null;
 
-                if (!clicked) {
-                  console.log('[Turnstile Bypass] Tentando clique físico por coordenadas no iframe...');
-                  const box = await iframeElement.boundingBox();
-                  if (box) {
-                    await page.mouse.click(box.x + 40, box.y + 35);
-                  }
+              for (const f of frames) {
+                const fUrl = f.url();
+                if (fUrl.includes('challenges.cloudflare.com')) {
+                  iframeEncontrado = f;
+                  break;
                 }
               }
-            } else {
-              console.log('[Turnstile Bypass] Nenhum iframe do Cloudflare visível no momento (pode ter liberado direto).');
-            }
-          } catch (turnstileErr) {
-            console.log('[Turnstile Bypass] Erro ao tentar resolver o widget:', turnstileErr.message);
+
+              if (iframeEncontrado) {
+                console.log(`[Turnstile Bypass] Iframe do Cloudflare detectado no segundo ${i + 1}. Tentando interagir...`);
+                
+                // Tenta clicar no checkbox interno do desafio
+                await iframeEncontrado.evaluate(() => {
+                  const cb = document.querySelector('input[type="checkbox"]') || document.querySelector('.cb-i') || document.body;
+                  if (cb) cb.click();
+                }).catch(() => {});
+
+                // Se o iframe principal tiver manipulador de boundingBox na página mãe
+                const elementHandle = await page.$('iframe[src*="challenges.cloudflare.com"]');
+                if (elementHandle) {
+                  const box = await elementHandle.boundingBox();
+                  if (box) {
+                    await page.mouse.click(box.x + 30, box.y + 30);
+                  }
+                }
+
+                turnstileResolvido = true;
+                console.log(`[Turnstile Bypass] Ação de clique executada com sucesso no desafio.`);
+                break;
+              }
+            } catch (e) {}
           }
 
-          // Simula ações complementares de movimento de mouse
-          await page.mouse.move(200, 200);
-          await page.evaluate(() => window.scrollBy(0, 250));
+          if (!turnstileResolvido) {
+            console.log(`[Turnstile Bypass] Nenhum desafio interativo exigiu clique (passou direto ou exigirá espera pura).`);
+          }
+
+          // Simula movimentos adicionais de mouse para garantir que o rastreio comportamental aprove a sessão
+          await page.mouse.move(150, 200);
+          await page.evaluate(() => window.scrollBy(0, 200));
             
-          console.log(`[Tentativa ${tentativa}] Aguardando o Angular disparar o request de rede da API...`);
+          console.log(`[Tentativa ${tentativa}] Aguardando o Cloudflare liberar e o Angular disparar a API...`);
           
-          // Loop de espera ativa unificado (até 60 segundos)
           let tempoEspera = 0;
-          while (!sucesso && tempoEspera < 60) {
+          while (!sucesso && tempoEspera < 50) {
             await new Promise(r => setTimeout(r, 1000));
             tempoEspera++;
             if (tempoEspera % 5 === 0) {
