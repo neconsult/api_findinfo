@@ -779,14 +779,22 @@ puppeteer2.use(StealthPlugin());
 app.get('/test-saneantes', async (req, res) => {
   let browser;
   const cnpj = req.query.cnpj || '00536772000142';
+  const PROXY_HOST = "190.124.252.129";
+  const PROXY_PORT = "6666";
 
   try {
-    console.log(`[Anvisa Proxy] Iniciando navegador com Stealth para o CNPJ: ${cnpj}`);
+    console.log(`[Anvisa Proxy] Iniciando navegador com Stealth e Proxy para o CNPJ: ${cnpj}`);
     
-    // Inicialização combinando puppeteer-extra com o binário do Render (@sparticuz/chromium)
+    // Inicialização com o proxy configurado nos argumentos
     browser = await puppeteer2.launch({
-      args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-      defaultViewport: chromium.defaultViewport,
+      args: [
+        ...chromium.args, 
+        '--hide-scrollbars', 
+        '--disable-web-security', 
+        `--proxy-server=http://${PROXY_HOST}:${PROXY_PORT}`,
+        '--window-size=1366,768'
+      ],
+      defaultViewport: { width: 1366, height: 768 },
       executablePath: await chromium.executablePath(),
       headless: chromium.headless,
       ignoreHTTPSErrors: true,
@@ -794,45 +802,93 @@ app.get('/test-saneantes', async (req, res) => {
 
     const page = await browser.newPage();
     
+    // TESTE DE IP: Verifica nos logs do Render se o tráfego está saindo pelo proxy correto
+    try {
+      await page.goto('https://api.ipify.org?format=json', { timeout: 15000 });
+      const ipInfo = await page.evaluate(() => document.body.innerText);
+      console.log(`[Anvisa Proxy Check] IP de saída atual do navegador: ${ipInfo}`);
+    } catch (e) {
+      console.log('[Anvisa Proxy Check] Falha ao testar IP de saída:', e.message);
+    }
+
+    // User-Agent padrão de mercado
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    console.log('[Anvisa Proxy] Acessando página base para capturar cookies...');
+    console.log('[Anvisa Proxy] Acessando a home da Anvisa...');
     await page.goto('https://consultas.anvisa.gov.br/', {
       waitUntil: 'networkidle2',
       timeout: 60000
     });
 
-    // Pausa para estabilizar a sessão e os cookies do Cloudflare
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    // Simulação de movimento humano para passar pelo Cloudflare Challenge
+    console.log('[Anvisa Proxy] Simulando interação humana...');
+    await page.mouse.move(100, 200);
+    await page.mouse.down();
+    await page.mouse.move(200, 300);
+    await page.mouse.up();
+
+    // Pausa de segurança para o Cloudflare validar a sessão
+    await new Promise(resolve => setTimeout(resolve, 7000));
 
     const targetUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
     
-    console.log(`[Anvisa Proxy] Requisitando JSON: ${targetUrl}`);
-    const jsonResult = await page.evaluate(async (url) => {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json, text/plain, */*',
-          'Referer': 'https://consultas.anvisa.gov.br/'
+    console.log(`[Anvisa Proxy] Executando fetch na API: ${targetUrl}`);
+    
+    const result = await page.evaluate(async (url) => {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://consultas.anvisa.gov.br/',
+            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="8", "Google Chrome";v="122"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          }
+        });
+
+        const textResponse = await response.text();
+        
+        if (!response.ok) {
+          return {
+            success: false,
+            status: response.status,
+            bodySnippet: textResponse.substring(0, 500)
+          };
         }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Erro HTTP da API da Anvisa: ${response.status}`);
+
+        return {
+          success: true,
+          data: JSON.parse(textResponse)
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: err.toString()
+        };
       }
-      
-      return await response.json();
     }, targetUrl);
 
     await browser.close();
 
+    if (!result.success) {
+      console.error('[Anvisa Cloudflare Block Details]:', result);
+      return res.status(403).json({
+        success: false,
+        message: "Bloqueio detectado pelo Cloudflare na API.",
+        details: result
+      });
+    }
+
     return res.json({
       success: true,
-      data: jsonResult
+      data: result.data
     });
 
   } catch (error) {
-    console.error('[Anvisa Proxy Error]:', error.message);
+    console.error('[Anvisa Proxy Critical Error]:', error.message);
     if (browser) await browser.close();
     
     return res.status(500).json({
