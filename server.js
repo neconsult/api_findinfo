@@ -838,7 +838,7 @@ let maxTentativas = 10;
           });
 
           // Monta a URL amigável exata informada
-          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/prosutos/q/?cnpj=00536772000142`;
+          const friendlyUrl = `https://consultas.anvisa.gov.br/#/saneantes/produtos/q/?cnpj=00536772000142`;
           console.log(`[Tentativa ${tentativa}] Acessando URL amigável${friendlyUrl}`);
 
           // Navega direto para a rota amigável usando domcontentloaded para evitar travamento de recursos estáticos
