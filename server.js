@@ -799,55 +799,71 @@ app.get('/test-saneantes', async (req, res) => {
       ignoreHTTPSErrors: true,
     });
 
-    const page = await browser.newPage();
-    
+   const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
-    let apiResponseJson = null;
-
-    // Intercepta a resposta da API da Anvisa em tempo de execução na rede do navegador
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes('/api/consulta/saneantes/notificados') && url.includes(cnpj)) {
-        try {
-          const json = await response.json();
-          apiResponseJson = json;
-          console.log('[Anvisa Intercept] JSON da API capturado com sucesso!');
-        } catch (e) {
-          console.error('[Anvisa Intercept] Erro ao parsear JSON interceptado:', e.message);
-        }
-      }
-    });
-
-    // Acessa diretamente a URL com o filtro de CNPJ na rota do Angular (igual ao seu print de navegação real)
-    const pageTargetUrl = `https://consultas.anvisa.gov.br/#/saneantes/notificados/q?cnpj=${cnpj}`;
-    console.log(`[Anvisa Proxy] Navegando diretamente para a página filtrada: ${pageTargetUrl}`);
+    // 1. Navega para a seção de saneantes para injetar os scripts do Turnstile
+    const pageTargetUrl = `https://consultas.anvisa.gov.br/#/saneantes/notificados`;
+    console.log(`[Anvisa Proxy] Acessando a interface de saneantes: ${pageTargetUrl}`);
     
     await page.goto(pageTargetUrl, {
       waitUntil: 'networkidle2',
       timeout: 60000
     });
 
-    console.log('[Anvisa Proxy] Aguardando a renderização e o disparo da API pela interface...');
+    // 2. Simula movimento de mouse para validação comportamental
+    await page.mouse.move(150, 250);
+    await page.mouse.down();
+    await page.mouse.move(250, 350);
+    await page.mouse.up();
 
-    // Aguarda até que a resposta da API seja capturada pela interceptação (máximo 15 segundos)
-    const startTime = Date.now();
-    while (!apiResponseJson && (Date.now() - startTime) < 15000) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
+    // 3. Aguarda o tempo necessário para o Turnstile processar o desafio em segundo plano (10 segundos)
+    console.log('[Anvisa Proxy] Aguardando estabilização do Turnstile...');
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    // 4. Executa o fetch direto na API já com a sessão aquecida e os tokens gerados no navegador
+    const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/notificados?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
+    console.log(`[Anvisa Proxy] Disparando fetch interno na API: ${targetApiUrl}`);
+
+    const apiResult = await page.evaluate(async (url) => {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://consultas.anvisa.gov.br/',
+            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="8", "Google Chrome";v="122"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          }
+        });
+
+        const text = await response.text();
+        if (!response.ok) {
+          return { success: false, status: response.status, body: text };
+        }
+        return { success: true, data: JSON.parse(text) };
+      } catch (err) {
+        return { success: false, error: err.toString() };
+      }
+    }, targetApiUrl);
 
     await browser.close();
 
-    if (!apiResponseJson) {
-      return res.status(404).json({
+    if (!apiResult.success) {
+      console.error('[Anvisa API Error]:', apiResult);
+      return res.status(403).json({
         success: false,
-        message: "A página carregou, mas a requisição da API não foi interceptada a tempo."
+        message: "Falha na chamada da API após carregamento da interface.",
+        details: apiResult
       });
     }
 
     return res.json({
       success: true,
-      data: apiResponseJson
+      data: apiResult.data
     });
 
   } catch (error) {
