@@ -779,6 +779,7 @@ puppeteer2.use(StealthPlugin());
 app.get('/test-saneantes', async (req, res) => {
   let browser;
   const cnpj = req.query.cnpj || '00536772000142';
+  const tipo = req.query.tipo || 'produtos';  
   const PROXY_HOST = "190.124.252.129";
   const PROXY_PORT = "6666";
 
@@ -802,7 +803,7 @@ const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
 
     // URL corrigida sem falhas de interpolação
-    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/\${tipo}/q/?cnpj=\${cnpj}`;
+    const internalUrl = `https://consultas.anvisa.gov.br/#/saneantes/${tipo}/q/?cnpj=${cnpj}`;
     console.log(`[Anvisa Proxy] Acessando rota visual: ${internalUrl}`);
 
     const responsePromise = page.waitForResponse(
