@@ -958,8 +958,8 @@ let maxTentativas = 2;
     try {
       await new Promise(async (resolve, reject) => {
         let timeoutHandle = setTimeout(() => {
-          reject(new Error("Timeout de 120s esgotado no ciclo de contorno da borda."));
-        }, 120000);
+          reject(new Error("Timeout de 240s esgotado no ciclo de contorno da borda."));
+        }, 240000);
 
         try {
           console.log(`[Tentativa ${tentativa}] Lançando Chromium Stealth com proxy ${PROXY_HOST}:${PROXY_PORT}...`);
