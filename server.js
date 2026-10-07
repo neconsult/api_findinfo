@@ -1055,7 +1055,7 @@ let maxTentativas = 2;
           }
 
           // Só executa o fetch na API se o cookie foi rigorosamente confirmado
-          const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
+          const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter[cnpj]=${cnpj}&order=asc&page=1`;
           console.log(`[Tentativa ${tentativa}] Sessão blindada! Disparando fetch na API: ${targetApiUrl}`);
 
           apiResult = await page.evaluate(async (url) => {
