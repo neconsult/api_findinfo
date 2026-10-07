@@ -1014,11 +1014,10 @@ let maxTentativas = 2;
 
             if (pageTitle && !pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde')) {
               desafioSuperado = true;
-              console.log(`[Cloudflare] Desafio superado com sucesso no segundo ${i+1}!`);
+              console.log(`[Cloudflare] Título liberado no segundo ${i+1}!`);
               break;
             }
 
-            // Rotina de clique cirúrgico por coordenadas no iframe do Turnstile assim que ele aparece
             try {
               const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
               if (iframeElement) {
@@ -1027,33 +1026,37 @@ let maxTentativas = 2;
                   const clickX = box.x + 45; 
                   const clickY = box.y + (box.height / 2);
                   
-                  console.log(`[Turnstile] Frame detectado! Clicando nas coordenadas X:${Math.round(clickX)}, Y:${Math.round(clickY)}`);
-                  
                   await page.mouse.move(clickX, clickY);
                   await page.mouse.down();
                   await new Promise(r => setTimeout(r, 100));
                   await page.mouse.up();
                 }
               }
-            } catch (errFrame) {
-              console.log('[Erro ao interagir com o frame]:', errFrame.message);
-            }
+            } catch (errFrame) {}
           }
 
-          // Aguarda cookie de liberação
-          console.log(`[Tentativa ${tentativa}] Verificando persistência do cookie cf_clearance...`);
-          for (let c = 0; c < 20; c++) {
+          // BLINDAGEM OBRIGATÓRIA: Aguarda e valida de forma estricta o cookie cf_clearance
+          console.log(`[Tentativa ${tentativa}] Validando obrigatoriamente a presença do cookie cf_clearance...`);
+          let cookieEncontrado = false;
+          
+          for (let c = 0; c < 30; c++) { // Até 30 segundos aguardando exclusivamente o cookie
             await new Promise(r => setTimeout(r, 1000));
             const cookies = await page.cookies();
-            if (cookies.find(cookie => cookie.name === 'cf_clearance')) {
-              console.log(`[Sessão] Cookie cf_clearance capturado com sucesso!`);
+            const clearance = cookies.find(cookie => cookie.name === 'cf_clearance');
+            if (clearance) {
+              console.log(`[Sessão OK] Cookie cf_clearance confirmado com sucesso no segundo ${c+1}!`);
+              cookieEncontrado = true;
               break;
             }
           }
 
-          // Executa fetch na API
+          if (!cookieEncontrado) {
+            throw new Error("Falha crítica: O cookie cf_clearance não foi emitido. O desafio do Cloudflare não foi vencido a tempo.");
+          }
+
+          // Só executa o fetch na API se o cookie foi rigorosamente confirmado
           const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
-          console.log(`[Tentativa ${tentativa}] Disparando fetch na API: ${targetApiUrl}`);
+          console.log(`[Tentativa ${tentativa}] Sessão blindada! Disparando fetch na API: ${targetApiUrl}`);
 
           apiResult = await page.evaluate(async (url) => {
             try {
@@ -1077,7 +1080,7 @@ let maxTentativas = 2;
             apiResult.data = JSON.parse(apiResult.body);
             sucesso = true;
           } else {
-            console.warn(`[Tentativa ${tentativa}] Resposta da API bloqueada/inválida:`, apiResult.body ? apiResult.body.substring(0, 150) : 'Vazio');
+            console.warn(`[Tentativa ${tentativa}] Resposta da API retornou status inválido:`, apiResult.body ? apiResult.body.substring(0, 150) : 'Vazio');
           }
 
           clearTimeout(timeoutHandle);
@@ -1112,7 +1115,7 @@ let maxTentativas = 2;
   if (!sucesso || !apiResult) {
     return res.status(504).json({
       success: false,
-      message: "Falha definitiva ao contornar o Turnstile da Cloudflare."
+      message: "Falha definitiva: O cookie cf_clearance não foi validado ou a API recusou a chamada."
     });
   }
 
