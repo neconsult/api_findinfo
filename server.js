@@ -1002,22 +1002,24 @@ let maxTentativas = 2;
 
           console.log(`[Tentativa ${tentativa}] Monitorando e resolvendo ativamente o Turnstile...`);
 
-          let desafioSuperado = false;
+          // FASE 1: Aguarda o término real do desafio validando o título da aba
+          let desafioConcluido = false;
           for (let i = 0; i < 60; i++) {
             await new Promise(r => setTimeout(r, 1000));
-            
             const pageTitle = await page.title().catch(() => '');
             
             if (i % 5 === 0) {
               console.log(`[Borda ${i+1}s] Título atual da aba: "${pageTitle}"`);
             }
 
-            if (pageTitle && !pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde')) {
-              desafioSuperado = true;
-              console.log(`[Cloudflare] Título liberado no segundo ${i+1}!`);
+            // Só considera superado se o título NÃO contiver os termos de bloqueio e não estiver vazio
+            if (pageTitle && !pageTitle.includes('Just a moment') && !pageTitle.includes('Checking') && !pageTitle.includes('Aguarde') && pageTitle !== '') {
+              desafioConcluido = true;
+              console.log(`[Sessão Estável] Página liberada com o título: "${pageTitle}" no segundo ${i+1}`);
               break;
             }
 
+            // Interação cirúrgica por coordenadas caso o iframe do Turnstile apareça
             try {
               const iframeElement = await page.$('iframe[src*="challenges.cloudflare.com"]');
               if (iframeElement) {
@@ -1035,28 +1037,16 @@ let maxTentativas = 2;
             } catch (errFrame) {}
           }
 
-          // BLINDAGEM OBRIGATÓRIA: Aguarda e valida de forma estricta o cookie cf_clearance
-          console.log(`[Tentativa ${tentativa}] Validando obrigatoriamente a presença do cookie cf_clearance...`);
-          let cookieEncontrado = false;
-          
-          for (let c = 0; c < 30; c++) { // Até 30 segundos aguardando exclusivamente o cookie
-            await new Promise(r => setTimeout(r, 1000));
-            const cookies = await page.cookies();
-            const clearance = cookies.find(cookie => cookie.name === 'cf_clearance');
-            if (clearance) {
-              console.log(`[Sessão OK] Cookie cf_clearance confirmado com sucesso no segundo ${c+1}!`);
-              cookieEncontrado = true;
-              break;
-            }
+          if (!desafioConcluido) {
+            throw new Error("O Cloudflare manteve a página travada no desafio após o tempo limite.");
           }
 
-          if (!cookieEncontrado) {
-            throw new Error("Falha crítica: O cookie cf_clearance não foi emitido. O desafio do Cloudflare não foi vencido a tempo.");
-          }
+          // Pausa preventiva para consolidação final da rede na sessão limpa
+          await new Promise(r => setTimeout(r, 3000));
 
-          // Só executa o fetch na API se o cookie foi rigorosamente confirmado
-          const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter[cnpj]=${cnpj}&order=asc&page=1`;
-          console.log(`[Tentativa ${tentativa}] Sessão blindada! Disparando fetch na API: ${targetApiUrl}`);
+          // FASE 2: Com a sessão 100% livre de bloqueios de borda, dispara o fetch na API
+          const targetApiUrl = `https://consultas.anvisa.gov.br/api/consulta/saneantes/${tipo}?column=&count=10&filter%5Bcnpj%5D=${cnpj}&order=asc&page=1`;
+          console.log(`[Tentativa ${tentativa}] Sessão blindada! Disparando fetch seguro na API: ${targetApiUrl}`);
 
           apiResult = await page.evaluate(async (url) => {
             try {
@@ -1115,7 +1105,7 @@ let maxTentativas = 2;
   if (!sucesso || !apiResult) {
     return res.status(504).json({
       success: false,
-      message: "Falha definitiva: O cookie cf_clearance não foi validado ou a API recusou a chamada."
+      message: "Falha definitiva: O desafio do Cloudflare não foi vencido a tempo ou a API recusou a chamada."
     });
   }
 
